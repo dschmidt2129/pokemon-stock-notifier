@@ -2,7 +2,7 @@ import time
 import logging
 import yaml
 
-from target_checker import TargetChecker
+from checker import Checker
 from backends import notify_desktop, notify_webhook
 
 
@@ -21,7 +21,7 @@ def main():
     webhook = cfg.get("webhook_url")
     desktop = cfg.get("notify_desktop", True)
 
-    checker = TargetChecker(user_agent=cfg.get("user_agent"))
+    checker = Checker(user_agent=cfg.get("user_agent"))
 
     last_in_stock = False
 

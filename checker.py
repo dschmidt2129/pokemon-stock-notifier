@@ -2,7 +2,7 @@ import requests
 from bs4 import BeautifulSoup
 
 
-class TargetChecker:
+class Checker:
     def __init__(self, user_agent=None, timeout=10):
         self.user_agent = user_agent or (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -28,7 +28,7 @@ class TargetChecker:
         soup = BeautifulSoup(html, "html.parser")
         text = soup.get_text(separator=" ", strip=True).lower()
 
-        if any(kw in text for kw in ("add to cart", "add to bag", "add to cart button", "add to cart\"")):
+        if any(kw in text for kw in ("add to cart", "add to bag", "add to cart button", "buy now")):
             return True, "Found add-to-cart text"
 
         if any(kw in text for kw in ("sold out", "out of stock", "unavailable")):
@@ -43,6 +43,8 @@ class TargetChecker:
         if button and button.get_text(strip=True):
             btn_text = button.get_text(strip=True).lower()
             if "add" in btn_text and ("cart" in btn_text or "bag" in btn_text):
+                return True, f"Found button text: {btn_text}"
+            elif "buy" in btn_text:
                 return True, f"Found button text: {btn_text}"
 
         # otherwise return False and a short snippet for inspection
