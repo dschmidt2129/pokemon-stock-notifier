@@ -1,5 +1,0 @@
-product_url: "https://www.target.com/p/example-product/-/A-00000000"
-interval_seconds: 30
-notify_desktop: true
-webhook_url: ""  # set to your webhook URL (Discord, Slack, IFTTT, etc.) to receive JSON payloads
-user_agent: ""  # optional custom User-Agent header
