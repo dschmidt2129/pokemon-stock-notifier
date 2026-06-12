@@ -28,7 +28,39 @@ class Checker:
         soup = BeautifulSoup(html, "html.parser")
         text = soup.get_text(separator=" ", strip=True).lower()
 
-        if any(kw in text for kw in ("add to cart", "add to bag", "add to cart button", "buy now")):
+        # If page contains add-to-cart phrases, ensure the corresponding button is clickable
+        add_kw = ("add to cart", "add to bag", "add to cart button", "buy now")
+        if any(kw in text for kw in add_kw):
+            # find elements that might represent add-to-cart and check for disabled state
+            def element_disabled(elem):
+                # attributes that indicate non-clickable/disabled state
+                if elem.has_attr("disabled"):
+                    return True
+                aria = elem.get("aria-disabled")
+                if aria and aria.lower() == "true":
+                    return True
+                cls = elem.get("class") or []
+                # class can be string or list depending on parser
+                if isinstance(cls, str):
+                    cls = [cls]
+                cls_joined = " ".join(cls).lower()
+                if any(token in cls_joined for token in ("disabled", "sold-out", "out-of-stock", "is-disabled")):
+                    return True
+                return False
+
+            found_add_elem = False
+            for tag in ("button", "a", "input"):
+                for elem in soup.find_all(tag):
+                    txt = (elem.get_text() or elem.get("value") or "").lower()
+                    if any(kw in txt for kw in add_kw):
+                        found_add_elem = True
+                        if not element_disabled(elem):
+                            return True, "Found enabled add-to-cart element"
+
+            # if add-to-cart text exists but matching elements are present and all disabled, treat as out of stock
+            if found_add_elem:
+                return False, "Found add-to-cart element(s) but they appear disabled"
+            # otherwise fall back to the text heuristic
             return True, "Found add-to-cart text"
 
         if any(kw in text for kw in ("sold out", "out of stock", "unavailable")):

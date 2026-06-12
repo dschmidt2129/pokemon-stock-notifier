@@ -100,7 +100,10 @@ def main():
                     if webhook:
                         notify_webhook(webhook, {"title": title, "message": message, "url": url, "product": name})
                     if email_cfg:
-                        notify_email(email_cfg, title, message)
+                        body = email_cfg.get("body", "")
+                        if body:
+                            body = body.format(product_name=name, url=url)
+                        notify_email(email_cfg, title, message, body)
                 last_in_stock[url] = in_stock
             except Exception as e:
                 logging.exception("Error checking %s: %s", url, e)

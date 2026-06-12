@@ -22,7 +22,7 @@ def notify_webhook(url, payload):
         logging.exception("Webhook notification failed")
 
 
-def notify_email(email_cfg, title, message):
+def notify_email(email_cfg, title, message, body=""):
     try:
         smtp_server = email_cfg.get("smtp_server")
         smtp_port = int(email_cfg.get("smtp_port", 587))
@@ -45,7 +45,8 @@ def notify_email(email_cfg, title, message):
         email_message["Subject"] = f"{subject_prefix} {title}".strip()
         email_message["From"] = from_addr
         email_message["To"] = ", ".join(to_addrs)
-        email_message.set_content(message)
+        # Use the provided body template if available, otherwise fall back to message
+        email_message.set_content(body or message)
 
         if use_ssl or smtp_port == 465:
             smtp = smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=10)
