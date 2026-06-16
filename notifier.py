@@ -48,6 +48,18 @@ def validate_config(cfg, products):
         if not isinstance(interval, int) or interval <= 0:
             raise ValueError("interval_seconds must be a positive integer")
 
+    if cfg.get("stock_notification_cooldown_minutes") is not None:
+        cooldown = cfg["stock_notification_cooldown_minutes"]
+        if not isinstance(cooldown, int) or cooldown < 0:
+            raise ValueError(
+                "stock_notification_cooldown_minutes must be a non-negative integer"
+            )
+
+    if cfg.get("check_delay_seconds") is not None:
+        delay = cfg["check_delay_seconds"]
+        if not isinstance(delay, int) or delay < 0:
+            raise ValueError("check_delay_seconds must be a non-negative integer")
+
     email_cfg = cfg.get("email")
     if email_cfg is None:
         return
@@ -81,8 +93,12 @@ def main():
     # Only consider email sending enabled when essential fields are provided.
     email_enabled = bool(email_cfg and any(email_cfg.get(k) for k in ("smtp_server", "from", "to")))
 
-    checker = Checker(user_agent=cfg.get("user_agent"))
+    cooldown_minutes = cfg.get("stock_notification_cooldown_minutes", 5)
+    cooldown_seconds = cooldown_minutes * 60
+    check_delay = cfg.get("check_delay_seconds", 5)
+    checker = Checker(user_agent=cfg.get("user_agent"), load_wait=check_delay)
     last_in_stock = {product["url"]: False for product in products}
+    last_notification_time = {product["url"]: 0.0 for product in products}
 
     logging.info("Starting notifier for %s products (every %ss)", len(products), interval)
     for product in products:
@@ -94,8 +110,23 @@ def main():
             name = product["name"]
             try:
                 in_stock, details = checker.is_in_stock(url)
-                logging.info("checking stock for item: %s", name)
-                if in_stock and not last_in_stock[url]:
+                logging.info(
+                    "checking stock for item: %s url=%s - in_stock=%s, details=%s",
+                    name,
+                    url,
+                    in_stock,
+                    details,
+                )
+                now = time.time()
+
+                should_notify = False
+                if in_stock:
+                    if not last_in_stock[url]:
+                        should_notify = True
+                    elif cooldown_seconds and now - last_notification_time[url] >= cooldown_seconds:
+                        should_notify = True
+
+                if should_notify:
                     title = f"{name} In Stock"
                     message = f"{details} -- {url}"
                     logging.info("In stock! %s", title)
@@ -108,6 +139,8 @@ def main():
                         if body:
                             body = body.format(product_name=name, url=url)
                         notify_email(email_cfg, title, message, body)
+                    last_notification_time[url] = now
+
                 last_in_stock[url] = in_stock
             except Exception as e:
                 logging.exception("Error checking %s: %s", url, e)

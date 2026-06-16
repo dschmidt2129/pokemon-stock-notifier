@@ -7,8 +7,9 @@ Usage
 1. Edit `config.yml` and add one or more items to the `products` list, including a `name` and `url` for each product.
 2. (Optional) Set `webhook_url` to receive JSON payloads when an item becomes available.
 3. (Optional) configure the `email` section to send email notifications.
-4. The notifier validates your config at startup and will raise an error if required fields are missing or invalid.
-5. Install dependencies:
+5. The notifier supports `stock_notification_cooldown_minutes` to avoid spamming repeated in-stock alerts for the same product.
+6. The notifier validates your config at startup and will raise an error if required fields are missing or invalid.
+7. Install dependencies:
 
 ```bash
 python -m pip install -r "requirements.txt"
@@ -37,7 +38,13 @@ email:
   use_ssl: false
 ```
 
-The notifier sends email notifications for each product when stock is first detected.Notes
+Optional cooldown example:
+
+```yaml
+stock_notification_cooldown_minutes: 5
+```
+
+The notifier sends email notifications for each product when stock is first detected and will resend after the configured cooldown if the product remains in stock.
 
 - The checker uses simple heuristics and may need adjustment for specific product pages. Edit `checker.py` to refine selectors or keywords.
 - If desktop notifications don't work, the script prints a console fallback message.

@@ -38,6 +38,13 @@ def test_validate_config_rejects_nonpositive_interval():
         validate_config(cfg, products)
 
 
+def test_validate_config_rejects_negative_cooldown():
+    cfg = {"stock_notification_cooldown_minutes": -1}
+    products = [{"name": "Example", "url": "https://example.com"}]
+    with pytest.raises(ValueError, match="stock_notification_cooldown_minutes must be a non-negative integer"):
+        validate_config(cfg, products)
+
+
 def test_validate_config_rejects_email_mapping_type():
     cfg = {"email": "not-a-map"}
     products = [{"name": "Example", "url": "https://example.com"}]
