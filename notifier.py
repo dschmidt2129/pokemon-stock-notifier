@@ -55,17 +55,19 @@ def validate_config(cfg, products):
     if not isinstance(email_cfg, dict):
         raise ValueError("The 'email' config section must be a mapping")
 
-    if any(value for value in email_cfg.values() if value is not None):
-        missing = [
-            field
-            for field in ("smtp_server", "from", "to")
-            if not email_cfg.get(field)
-        ]
-        if missing:
-            raise ValueError(
-                "Email config is incomplete. Add the following fields: "
-                + ", ".join(missing)
-            )
+    # Treat email as "enabled" only when the user has provided at least one
+    # meaningful email field (e.g. smtp_server, username, from, to). Defaults
+    # like smtp_port/use_tls alone should not enable email validation.
+    enabled_keys = ("smtp_server", "username", "password", "from", "to")
+    enabled = any(bool(email_cfg.get(k)) for k in enabled_keys)
+    if not enabled:
+        return
+
+    missing = [field for field in ("smtp_server", "from", "to") if not email_cfg.get(field)]
+    if missing:
+        raise ValueError(
+            "Email config is incomplete. Add the following fields: " + ", ".join(missing)
+        )
 
 
 def main():
@@ -76,6 +78,8 @@ def main():
     webhook = cfg.get("webhook_url")
     desktop = cfg.get("notify_desktop", True)
     email_cfg = cfg.get("email", {})
+    # Only consider email sending enabled when essential fields are provided.
+    email_enabled = bool(email_cfg and any(email_cfg.get(k) for k in ("smtp_server", "from", "to")))
 
     checker = Checker(user_agent=cfg.get("user_agent"))
     last_in_stock = {product["url"]: False for product in products}
@@ -99,7 +103,7 @@ def main():
                         notify_desktop(title, message)
                     if webhook:
                         notify_webhook(webhook, {"title": title, "message": message, "url": url, "product": name})
-                    if email_cfg:
+                    if email_enabled:
                         body = email_cfg.get("body", "")
                         if body:
                             body = body.format(product_name=name, url=url)
