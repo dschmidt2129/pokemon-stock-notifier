@@ -3,3 +3,4 @@ beautifulsoup4
 pyyaml
 plyer
 pytest
+playwright

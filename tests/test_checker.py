@@ -25,6 +25,12 @@ def test_is_in_stock_button_text():
     assert checker.is_in_stock("https://example.com")[0] is True
 
 
+def test_is_in_stock_button_match_by_id():
+    checker = Checker()
+    checker.fetch = lambda url: '<html><body><button id="add-to-cart-button">Buy</button></body></html>'
+    assert checker.is_in_stock("https://example.com")[0] is True
+
+
 def test_is_in_stock_falls_back_to_snippet():
     checker = Checker()
     checker.fetch = lambda url: "<html><body>No stock information here</body></html>"
