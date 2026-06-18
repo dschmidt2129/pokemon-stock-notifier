@@ -2,14 +2,14 @@ import logging
 import time
 import requests
 from bs4 import BeautifulSoup
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, Page
 
 logger = logging.getLogger(__name__)
 
 
 class Checker:
     # buffer wait is not working when checking the page contents.  need to find different solution
-    def __init__(self, user_agent=None, timeout=10, load_wait=0, buffer_wait=5):
+    def __init__(self, user_agent=None, timeout=10, load_wait=0, buffer_wait=0):
         self.user_agent = user_agent or (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
             "(KHTML, like Gecko) Chrome/115.0 Safari/537.36"
@@ -19,18 +19,20 @@ class Checker:
         self.buffer_wait = buffer_wait
 
     def _button_is_visible(self, button):
+        logger.info("Checking button visibility")
         if button.has_attr("hidden"):
+            logger.info("Button is hidden due to 'hidden' attribute")
             return False
-
-        style = button.get("style", "").lower().replace(" ", "")
-        if "display:none" in style or "visibility:hidden" in style:
-            return False
-
-        button_classes = button.get("class", [])
-        if any("hidden" in str(cls).lower() for cls in button_classes):
-            return False
-
+        logger.info("Button does not have 'hidden' attribute, assuming it is visible")
         return True
+
+    def _button_is_disabled(self, button):
+        logger.info("Checking button accessibility")
+        if button.has_attr("disabled"):
+            logger.info("Button is disabled due to 'disabled' attribute")
+            return True
+        logger.info("Button does not have 'disabled' attribute, assuming it is enabled  and accessible")
+        return False
 
     def fetch(self, url):
         headers = {"User-Agent": self.user_agent}
@@ -81,6 +83,7 @@ class Checker:
                 print("Could not locate the button in the rendered HTML structural tree.")
                 
             browser.close()
+        return cart_button
 
     def is_in_stock(self, url):
         """Return (bool, reason_str). Uses simple heuristics for Target product pages.
@@ -119,34 +122,30 @@ class Checker:
         if any(kw in text for kw in ("ship it", "available for pickup", "pick up")):
             return True, "Found availability text"
 
-        # Fallback for pages that have stock text but no HTML button
-        # add_keywords = ("add to cart", "add to bag", "buy now")
-        # if not soup.find("button") and any(kw in text for kw in add_keywords):
-        #     return True, "Found add-to-cart text"
-
         # Now check for the add-to-cart button specifically
         add_button = self.get_target_cart_button(url)
+        
         if add_button is not None:
+            logger.info("Add-to-cart button found, checking visibility and enabled state")
+            logger.info(f"Button attributes: {add_button.attrs}")
+            is_visible = self._button_is_visible(add_button)
+            is_disabled = self._button_is_disabled(add_button)
             btn_text = add_button.get_text(strip=True).lower()
             aria_label = add_button.get("aria-label", "").strip()
-            is_hidden = not self._button_is_visible(add_button)
-            is_disabled = self._button_is_disabled(add_button)
-
+            # breakpoint()
             logger.debug(
-                "Found add-to-cart button: text=%r, aria-label=%r, class=%s, id=%r, data-test=%r, disabled=%s, hidden=%s",
-                btn_text,
-                aria_label,
+                "Found add-to-cart button: class=%s, id=%r, data-test=%r, disabled=%s, hidden=%s",
                 add_button.get("class", []),
                 add_button.get("id", ""),
                 add_button.get("data-test", ""),
                 is_disabled,
-                is_hidden,
+                is_visible
             )
-
+            # breakpoint()
             if is_disabled:
                 logger.info("Add-to-cart button is disabled")
                 return False, "Found add-to-cart button, but it is disabled"
-            if is_hidden:
+            if not is_visible:
                 logger.info("Add-to-cart button is hidden")
                 return False, "Found add-to-cart button, but it is not visible"
 
