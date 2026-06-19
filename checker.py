@@ -60,16 +60,24 @@ class Checker:
             # We wait until the specific button test-ID or text renders.
             try:
                 page.wait_for_selector('button[data-test="shippingButton"]', timeout=10000)
+                logger.info("Add to cart button selector found on the page.")
             except Exception:
                 print("Timeout waiting for the add to cart button element.")
 
             # Pass the fully rendered JavaScript page source to BeautifulSoup
             html_content = page.content()
+            # logger.info(f"Fetched page content \n{html_content[:10000000]}...")  # Log the first 500 characters of the page content for debugging
+            # breakpoint()
             soup = BeautifulSoup(html_content, "html.parser")
             
             # Method A: Finding by Target's internal data-test attribute (Most Reliable)
+            # todo: convert the sensitive config items to .env variables and add to .gitignore
             cart_button = soup.find("button", {"data-test": "shippingButton"})
-            
+            # breakpoint()    
+            # is_disabled = page.get_by_role("button", {"name": "Add to cart"}).is_disabled() 
+            # logger.info(f"Cart button disabled state: {is_disabled}")
+            # breakpoint()
+            logger.info(f"Attribute List for cart button {cart_button.attrs}") # the add to cart button doesn't have disabled in the attributes pulled by beautifulsoup, but it is disabled on the page.  This may be because the disabled state is being set by JavaScript after the page loads, and BeautifulSoup is only seeing the initial HTML.    
             # Method B: Alternative fallback (if they are using standard fulfillment text)
             if not cart_button:
                 cart_button = soup.find("button", string=lambda text: text and "Add to cart" in text)
@@ -86,41 +94,27 @@ class Checker:
         return cart_button
 
     def is_in_stock(self, url):
-        """Return (bool, reason_str). Uses simple heuristics for Target product pages.
 
-        Heuristic summary:
-        - If page contains 'sold out' or 'out of stock' -> not in stock
-        - If page contains 'add to cart' button that is visible and not disabled -> in stock
-        - Otherwise, return False with page snippet for debugging
-        """
-        html = self.fetch(url)
-        logger.info("Page fetched for %s", url)
-        if self.buffer_wait:
-            logger.info(
-                "Waiting %ss after fetch for page content to settle for %s",
-                self.buffer_wait,
-                url,
-            )
-            time.sleep(self.buffer_wait)
-            logger.info(
-                "Finished waiting %ss after fetch for %s",
-                self.buffer_wait,
-                url,
-            )
-        if self.load_wait:
-            logger.info("Waiting %ss before checking page content for %s", self.load_wait, url)
-            time.sleep(self.load_wait)
-            logger.info("Finished waiting %ss, checking page content for %s", self.load_wait, url)
-        soup = BeautifulSoup(html, "html.parser")
-        text = soup.get_text(separator=" ", strip=True).lower()
-
-        # Check for explicit out of stock indicators first
-        if any(kw in text for kw in ("sold out", "out of stock", "unavailable")):
-            return False, "Found sold-out text"
-
-        # Check for explicit in stock indicators
-        if any(kw in text for kw in ("ship it", "available for pickup", "pick up")):
-            return True, "Found availability text"
+        # html = self.fetch(url)
+        # logger.info("Page fetched for %s", url)
+        # if self.buffer_wait:
+        #     logger.info(
+        #         "Waiting %ss after fetch for page content to settle for %s",
+        #         self.buffer_wait,
+        #         url,
+        #     )
+        #     time.sleep(self.buffer_wait)
+        #     logger.info(
+        #         "Finished waiting %ss after fetch for %s",
+        #         self.buffer_wait,
+        #         url,
+        #     )
+        # if self.load_wait:
+        #     logger.info("Waiting %ss before checking page content for %s", self.load_wait, url)
+        #     time.sleep(self.load_wait)
+        #     logger.info("Finished waiting %ss, checking page content for %s", self.load_wait, url)
+        # soup = BeautifulSoup(html, "html.parser")
+        # text = soup.get_text(separator=" ", strip=True).lower()
 
         # Now check for the add-to-cart button specifically
         add_button = self.get_target_cart_button(url)
@@ -130,15 +124,17 @@ class Checker:
             logger.info(f"Button attributes: {add_button.attrs}")
             is_visible = self._button_is_visible(add_button)
             is_disabled = self._button_is_disabled(add_button)
+            # breakpoint()
             btn_text = add_button.get_text(strip=True).lower()
             aria_label = add_button.get("aria-label", "").strip()
             # breakpoint()
-            logger.debug(
+            logger.info(
                 "Found add-to-cart button: class=%s, id=%r, data-test=%r, disabled=%s, hidden=%s",
                 add_button.get("class", []),
                 add_button.get("id", ""),
                 add_button.get("data-test", ""),
-                is_disabled,
+                add_button.get("disabled", ""),  
+                # is_disabled,
                 is_visible
             )
             # breakpoint()

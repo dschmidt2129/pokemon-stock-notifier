@@ -6,7 +6,7 @@ Usage
 
 1. Edit `config.yml` and add one or more items to the `products` list, including a `name` and `url` for each product.
 2. (Optional) Set `webhook_url` to receive JSON payloads when an item becomes available.
-3. (Optional) configure the `email` section to send email notifications.
+3. (Optional) configure a local `.env` file to send email notifications.
 5. The notifier supports `stock_notification_cooldown_minutes` to avoid spamming repeated in-stock alerts for the same product.
 6. The notifier validates your config at startup and will raise an error if required fields are missing or invalid.
 7. Install dependencies:
@@ -25,17 +25,19 @@ If you are still using the old style config keys like `walmart_pokemon151_bb_url
 
 Email configuration example:
 
-```yaml
-email:
-  smtp_server: "smtp.example.com"
-  smtp_port: 587
-  username: "user@example.com"
-  password: "supersecret"
-  from: "notifier@example.com"
-  to: "you@example.com, other@example.com"
-  subject_prefix: "[Stock Alert]"
-  use_tls: true
-  use_ssl: false
+Create a local `.env` file next to `notifier.py` and set your SMTP credentials there. This keeps email secrets out of `config.yml`.
+
+```env
+SMTP_SERVER=smtp.example.com
+SMTP_PORT=587
+EMAIL_USERNAME=user@example.com
+EMAIL_PASSWORD=supersecret
+EMAIL_FROM=notifier@example.com
+EMAIL_TO=you@example.com,other@example.com
+EMAIL_SUBJECT_PREFIX=[Stock Alert]
+EMAIL_BODY=The {product_name} is back in stock! Check it out here: {url}
+EMAIL_USE_TLS=true
+EMAIL_USE_SSL=false
 ```
 
 Optional cooldown example:

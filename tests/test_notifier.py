@@ -1,6 +1,8 @@
+import os
+
 import pytest
 
-from notifier import build_product_list, load_config, validate_config
+from config import build_product_list, load_config, validate_config
 
 
 def test_build_product_list_from_products():
@@ -67,3 +69,22 @@ def test_load_config(tmp_path):
     )
     cfg = load_config(str(config_file))
     assert cfg["products"][0]["url"] == "https://example.com"
+
+
+def test_load_config_merges_env_settings(tmp_path):
+    config_file = tmp_path / "config.yml"
+    env_file = tmp_path / ".env"
+
+    config_file.write_text(
+        "products:\n  - name: Example\n    url: https://example.com\n",
+        encoding="utf-8",
+    )
+    env_file.write_text(
+        "SMTP_SERVER=smtp.example.com\nEMAIL_USERNAME=user@example.com\nEMAIL_PASSWORD=pass\nEMAIL_FROM=sender@example.com\nEMAIL_TO=recipient@example.com\nEMAIL_USE_TLS=true\n",
+        encoding="utf-8",
+    )
+
+    cfg = load_config(str(config_file), str(env_file))
+    assert cfg["email"]["smtp_server"] == "smtp.example.com"
+    assert cfg["email"]["username"] == "user@example.com"
+    assert cfg["email"]["use_tls"] is True

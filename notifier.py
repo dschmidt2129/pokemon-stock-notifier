@@ -1,85 +1,11 @@
 import time
 import logging
-import yaml
 
 from checker import Checker
 from backends import notify_desktop, notify_webhook, notify_email
-
+from config import build_product_list, load_config, validate_config
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-
-
-def load_config(path="config.yml"):
-    with open(path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
-
-
-def build_product_list(cfg):
-    products = cfg.get("products")
-    if products:
-        return [
-            {
-                "name": product.get("name") or product.get("url"),
-                "url": product["url"],
-            }
-            for product in products
-            if product.get("url")
-        ]
-
-    # Backwards compatibility for old single-product config keys.
-    fallback = []
-    for key, value in cfg.items():
-        if key.endswith("_url") and isinstance(value, str):
-            fallback.append({"name": key, "url": value})
-
-    return fallback
-
-
-def validate_config(cfg, products):
-    if not products:
-        raise ValueError("No products configured in config.yml")
-
-    for product in products:
-        if not product.get("url"):
-            raise ValueError(f"Product entry missing 'url': {product}")
-
-    if cfg.get("interval_seconds") is not None:
-        interval = cfg["interval_seconds"]
-        if not isinstance(interval, int) or interval <= 0:
-            raise ValueError("interval_seconds must be a positive integer")
-
-    if cfg.get("stock_notification_cooldown_minutes") is not None:
-        cooldown = cfg["stock_notification_cooldown_minutes"]
-        if not isinstance(cooldown, int) or cooldown < 0:
-            raise ValueError(
-                "stock_notification_cooldown_minutes must be a non-negative integer"
-            )
-
-    if cfg.get("check_delay_seconds") is not None:
-        delay = cfg["check_delay_seconds"]
-        if not isinstance(delay, int) or delay < 0:
-            raise ValueError("check_delay_seconds must be a non-negative integer")
-
-    email_cfg = cfg.get("email")
-    if email_cfg is None:
-        return
-
-    if not isinstance(email_cfg, dict):
-        raise ValueError("The 'email' config section must be a mapping")
-
-    # Treat email as "enabled" only when the user has provided at least one
-    # meaningful email field (e.g. smtp_server, username, from, to). Defaults
-    # like smtp_port/use_tls alone should not enable email validation.
-    enabled_keys = ("smtp_server", "username", "password", "from", "to")
-    enabled = any(bool(email_cfg.get(k)) for k in enabled_keys)
-    if not enabled:
-        return
-
-    missing = [field for field in ("smtp_server", "from", "to") if not email_cfg.get(field)]
-    if missing:
-        raise ValueError(
-            "Email config is incomplete. Add the following fields: " + ", ".join(missing)
-        )
 
 
 def main():
@@ -90,7 +16,6 @@ def main():
     webhook = cfg.get("webhook_url")
     desktop = cfg.get("notify_desktop", True)
     email_cfg = cfg.get("email", {})
-    # Only consider email sending enabled when essential fields are provided.
     email_enabled = bool(email_cfg and any(email_cfg.get(k) for k in ("smtp_server", "from", "to")))
 
     cooldown_minutes = cfg.get("stock_notification_cooldown_minutes", 5)

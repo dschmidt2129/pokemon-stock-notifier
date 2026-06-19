@@ -1,0 +1,36 @@
+products:
+  # - name: "Walmart Destined Rivals Booster Bundle"
+  #   url: "https://www.walmart.com/ip/Pokemon-TCG-Scarlet-Violet-Destined-Rivals-Booster-Bundle-6-Packs/16019713971?conditionGroupCode=4&filters=%5B%7B%22intent%22%3A%22retailer%22%2C%22values%22%3A%5B%22Walmart%22%5D%7D%5D&classType=REGULAR&from=/search"
+  # - name: "Walmart Destined Rivals Booster Pack"
+  #   url: "https://www.walmart.com/ip/Pokemon-TCG-Scarlet-Violet-Destined-Rivals-Blister-Booster-Pack-10-Cards/16034470614?conditionGroupCode=4&filters=%5B%7B%22intent%22%3A%22retailer%22%2C%22values%22%3A%5B%22Walmart%22%5D%7D%5D&classType=REGULAR&from=/search"
+  - name: "Target Destined Rivals 3 Pack Blister"
+    url: "https://www.target.com/p/pok-233-mon-trading-card-game-scarlet-38-violet-8212-destined-rivals-three-booster-blister-kangaskhan/-/A-94300082#lnk=sametab"
+  # - name: "Target Destined Rivals Booster Bundle"
+  #   url: "https://www.target.com/p/pok-233-mon-trading-card-game-scarlet-38-violet-8212-destined-rivals-booster-bundle/-/A-94300067#lnk=sametab"
+  # - name: "Target Journey Together 3 Pack Blister"
+  #   url: "https://www.target.com/p/2025-pokemon-scarlet-violet-s9-3pk-bl-version-1/-/A-93859728#lnk=sametab"
+  # - name: "Target Journey Together Booster Bundle"
+  #   url: "https://www.target.com/p/pok-233-mon-trading-card-game-scarlet-38-violet-8212-journey-together-booster-bundle/-/A-94300074#lnk=sametab"
+  # - name: "Target Prismatic Evolutions ETB"
+  #   url: "https://www.target.com/p/pok-233-mon-trading-card-game-scarlet-38-violet-8212-prismatic-evolutions-elite-trainer-box/-/A-1011206804#lnk=sametab"
+  # - name: "Target Prismatic Evolutions Booster Bundle"
+  #   url: "https://www.target.com/p/pok-233-mon-trading-card-game-scarlet-38-violet-prismatic-evolutions-booster-bundle/-/A-93954446#lnk=sametab"
+  # - name: "Target Prismatic Evolutions SPC"
+  #   url: "https://www.target.com/p/pok-233-mon-trading-card-game-scarlet-38-violet-8212-prismatic-evolutions-super-premium-collection/-/A-94300072#lnk=sametab"
+  # - name: "Target Pokemon 151 ETB"
+  #   url: "https://www.target.com/p/pokemon-trading-card-game-scarlet-38-violet-151-elite-trainer-box/-/A-88897899#lnk=sametab"
+  # - name: "Target Pokemon 151 Booster Bundle"
+  #   url: "https://www.target.com/p/pokemon-scarlet-violet-s3-5-booster-bundle-box/-/A-88897904#lnk=sametab"
+  # - name: "Target Twilight Masquerade ETB"
+  #   url: "https://www.target.com/p/pok-233-mon-trading-card-game-scarlet-38-violet-8212-twilight-masquerade-elite-trainer-box/-/A-91619960#lnk=sametab"
+  # - name: "Target Twilight Masquerade Booster Bundle"
+  #   url: "https://www.target.com/p/pok-233-mon-trading-card-game-scarlet-38-violet-8212-twilight-masquerade-booster-bundle/-/A-91619954#lnk=sametab"
+  # - name: "Target Twilight Masquerade 3 Pack Blister"
+  #   url: "https://www.target.com/p/pok-233-mon-trading-card-game-scarlet-38-violet-8212-twilight-masquerade-three-booster-blister-revavroom/-/A-91619920#lnk=sametab"  
+  # - name: "Target Test Product"
+  #   url: "https://www.target.com/p/pokemon-sv10-destined-rivals-booster-bundle-2-pack/-/A-1004021933#lnk=sametab"
+interval_seconds: 15
+check_delay_seconds: 0
+notify_desktop: true
+webhook_url: ""  # set to your webhook URL (Discord, Slack, IFTTT, etc.) to receive JSON payloads
+user_agent: ""  # optional custom User-Agent header
