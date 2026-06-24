@@ -58,16 +58,66 @@ class Checker:
             
             # Target's Add to Cart button relies on data attributes. 
             # We wait until the specific button test-ID or text renders.
+            # Target also applies dynamic content loading, so we wait for the button to appear and is clickable 
             try:
                 page.wait_for_selector('button[data-test="shippingButton"]', timeout=10000)
                 logger.info("Add to cart button selector found on the page.")
             except Exception:
                 print("Timeout waiting for the add to cart button element.")
 
+            # Attempt to click the button using Playwright to determine enabled/disabled state
+            selector = 'button[data-test="shippingButton"]'
+            click_ok = False
+            try:
+                py_button = page.query_selector(selector)
+                if py_button:
+                    try:
+                        page.click(selector, timeout=3000)
+                        logger.info("Normal Playwright click succeeded — button appears enabled")
+                        click_ok = True
+                    except Exception as e:
+                        err_text = str(e)
+                        logger.info("Normal Playwright click failed: %s", err_text)
+                        if "intercepts pointer events" in err_text or "intercepting pointer events" in err_text:
+                            logger.info("Detected overlay intercept error; trying overlay fallback click method")
+                            try:
+                                page.evaluate("document.querySelectorAll('.styles_overlay__AJMdo').forEach(e => { e.style.pointerEvents = 'none'; e.style.display = 'none'; })")
+                                page.wait_for_timeout(100)
+                                page.click(selector, timeout=5000)
+                                logger.info("Fallback click succeeded after disabling overlay")
+                                click_ok = True
+                            except Exception as e2:
+                                logger.info("Overlay disable regular click failed: %s", e2)
+                                try:
+                                    page.locator(selector).click(force=True, timeout=5000)
+                                    logger.info("Force click succeeded after disabling overlay")
+                                    click_ok = True
+                                except Exception as e3:
+                                    logger.info("Force click failed: %s", e3)
+                                    try:
+                                        page.evaluate(
+                                            "selector => document.querySelector(selector)?.click()",
+                                            selector
+                                        )
+                                        logger.info("DOM click dispatch succeeded after disabling overlay")
+                                        click_ok = True
+                                    except Exception as e4:
+                                        logger.info("DOM click dispatch failed: %s", e4)
+                                        click_ok = False
+                        else:
+                            logger.info("Click failed for a reason other than overlay interception; not using overlay fallback")
+                            click_ok = False
+                else:
+                    logger.info("Playwright could not find button element for clicking")
+            except Exception as e:
+                logger.info("Error while attempting Playwright click check: %s", e)
+            
+            logger.info("Button Click Check Result: %s", "Enabled" if click_ok else "Disabled or Not Found")
+
             # Pass the fully rendered JavaScript page source to BeautifulSoup
             html_content = page.content()
             soup = BeautifulSoup(html_content, "html.parser")
-            
+
             # Method A: Finding by Target's internal data-test attribute (Most Reliable)
             cart_button = soup.find("button", {"data-test": "shippingButton"})
 
@@ -75,27 +125,27 @@ class Checker:
             if not cart_button:
                 cart_button = soup.find("button", string=lambda text: text and "Add to cart" in text)
 
-            if cart_button:
-                print("--- Button Found Successfully! ---")
-                print(f"Tag: {cart_button.name}")
-                print(f"Text Content: {cart_button.get_text(strip=True)}")
-                print(f"Attributes: {cart_button.attrs}")
-            else:
-                print("Could not locate the button in the rendered HTML structural tree.")
-                
+            # if cart_button:
+            #     print("--- Button Found Successfully! ---")
+            #     print(f"Tag: {cart_button.name}")
+            #     print(f"Text Content: {cart_button.get_text(strip=True)}")
+            #     print(f"Attributes: {cart_button.attrs}")
+            # else:
+            #     print("Could not locate the button in the rendered HTML structural tree.")
+
             browser.close()
-        return cart_button
+        return cart_button, click_ok
 
     def is_in_stock(self, url):
 
         # Now check for the add-to-cart button specifically
-        add_button = self.get_target_cart_button(url)
-        
+        add_button, click_ok = self.get_target_cart_button(url)
+
         if add_button is not None:
             logger.info("Add-to-cart button found, checking visibility and enabled state")
-            logger.info(f"Button attributes: {add_button.attrs}")
+            # logger.info(f"Button attributes: {add_button.attrs}")
             is_visible = self._button_is_visible(add_button)
-            is_disabled = self._button_is_disabled(add_button)
+            # is_disabled = self._button_is_disabled(add_button)
             btn_text = add_button.get_text(strip=True).lower()
             aria_label = add_button.get("aria-label", "").strip()
             logger.info(
@@ -103,19 +153,28 @@ class Checker:
                 add_button.get("class", []),
                 add_button.get("id", ""),
                 add_button.get("data-test", ""),
-                add_button.get("disabled", ""),  
+                # add_button.get("disabled", ""), 
+                click_ok, 
                 is_visible
             )
-            if is_disabled:
+            if not click_ok:
                 logger.info("Add-to-cart button is disabled")
                 return False, "Found add-to-cart button, but it is disabled"
             if not is_visible:
                 logger.info("Add-to-cart button is hidden")
                 return False, "Found add-to-cart button, but it is not visible"
 
+            # If the Playwright click succeeded earlier, treat the button as enabled
+            if click_ok:
+                logger.info("Playwright click indicated the button is enabled: ITEM IS IN STOCK")
+                return True, f"Found enabled add-to-cart button (click succeeded): {btn_text or aria_label}"
+
             logger.info("Add-to-cart button is enabled and visible: ITEM IS IN STOCK")
             return True, f"Found enabled add-to-cart button: {btn_text or aria_label}"
 
         logger.info("No add-to-cart button found")
-        snippet = text[:200]
+        try:
+            snippet = self.fetch(url)[:200]
+        except Exception:
+            snippet = ""
         return False, f"No clear stock indicators. Snippet: {snippet}"
