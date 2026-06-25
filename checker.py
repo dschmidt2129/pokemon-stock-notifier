@@ -26,14 +26,6 @@ class Checker:
         logger.info("Button does not have 'hidden' attribute, assuming it is visible")
         return True
 
-    def _button_is_disabled(self, button):
-        logger.info("Checking button accessibility")
-        if button.has_attr("disabled"):
-            logger.info("Button is disabled due to 'disabled' attribute")
-            return True
-        logger.info("Button does not have 'disabled' attribute, assuming it is enabled  and accessible")
-        return False
-
     def fetch(self, url):
         headers = {"User-Agent": self.user_agent}
         resp = requests.get(url, headers=headers, timeout=self.timeout)
@@ -42,13 +34,23 @@ class Checker:
 
     def get_target_cart_button(self, url):
         with sync_playwright() as p:
-            # Launch browser with basic user arguments to limit bot detection
-            browser = p.chromium.launch(headless=True)
+            # Use the system Chrome browser (channel="chrome") rather than Playwright's
+            # bundled Chromium.  Target's bot-detection permanently blocks bundled Chromium;
+            # real Chrome has the fingerprint needed to pass the challenge.
+            browser = p.chromium.launch(
+                channel="chrome",
+                headless=True,
+                args=["--disable-blink-features=AutomationControlled"]
+            )
             
             # Emulate a standard desktop browser environment
             context = browser.new_context(
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                 viewport={"width": 1280, "height": 720}
+            )
+            # Remove the navigator.webdriver flag that headless Chrome exposes
+            context.add_init_script(
+                "Object.defineProperty(navigator, 'webdriver', { get: () => undefined });"
             )
             
             page = context.new_page()
@@ -65,6 +67,36 @@ class Checker:
             except Exception:
                 print("Timeout waiting for the add to cart button element.")
 
+            # Target shows a bot-detection challenge ("Loading screen / Almost there...")
+            # inside a floating UI portal overlay before revealing the real page state.
+            # On fast machines this overlay is still active when the click is attempted,
+            # causing false results.  Wait for it to clear before proceeding.
+            try:
+                portal_text = page.evaluate("""
+                    () => Array.from(document.querySelectorAll('[data-floating-ui-portal]'))
+                              .map(p => p.textContent.trim().toLowerCase()).join(' ')
+                """)
+                bot_check_signals = ["loading screen", "almost there", "thank you for your patience", "loading content"]
+                if any(s in portal_text for s in bot_check_signals):
+                    logger.info("Target bot-check overlay detected; waiting for it to clear")
+                    page.wait_for_selector(".styles_overlay__AJMdo", state="hidden", timeout=30000)
+                    logger.info("Bot-check overlay cleared")
+                    # After the challenge clears, Target re-renders the page and makes stock
+                    # API calls.  Wait for network idle so the button reaches its final state.
+                    try:
+                        page.wait_for_load_state("networkidle", timeout=10000)
+                        logger.info("Network idle reached after bot-check — stock state is final")
+                    except Exception:
+                        logger.info("Network idle timeout after bot-check; proceeding")
+                    # Re-wait for the shipping button in its final post-render state
+                    try:
+                        page.wait_for_selector('button[data-test="shippingButton"]', timeout=8000)
+                        logger.info("Shipping button confirmed present after bot-check re-render")
+                    except Exception:
+                        logger.info("Shipping button not found after bot-check re-render; using current state")
+            except Exception as bot_e:
+                logger.info("Bot-check overlay wait result: %s", bot_e)
+
             # Attempt to click the button using Playwright to determine enabled/disabled state
             selector = 'button[data-test="shippingButton"]'
             click_ok = False
@@ -79,31 +111,19 @@ class Checker:
                         err_text = str(e)
                         logger.info("Normal Playwright click failed: %s", err_text)
                         if "intercepts pointer events" in err_text or "intercepting pointer events" in err_text:
-                            logger.info("Detected overlay intercept error; trying overlay fallback click method")
-                            try:
-                                page.evaluate("document.querySelectorAll('.styles_overlay__AJMdo').forEach(e => { e.style.pointerEvents = 'none'; e.style.display = 'none'; })")
-                                page.wait_for_timeout(100)
-                                page.click(selector, timeout=5000)
-                                logger.info("Fallback click succeeded after disabling overlay")
-                                click_ok = True
-                            except Exception as e2:
-                                logger.info("Overlay disable regular click failed: %s", e2)
-                                try:
-                                    page.locator(selector).click(force=True, timeout=5000)
-                                    logger.info("Force click succeeded after disabling overlay")
-                                    click_ok = True
-                                except Exception as e3:
-                                    logger.info("Force click failed: %s", e3)
-                                    try:
-                                        page.evaluate(
-                                            "selector => document.querySelector(selector)?.click()",
-                                            selector
-                                        )
-                                        logger.info("DOM click dispatch succeeded after disabling overlay")
-                                        click_ok = True
-                                    except Exception as e4:
-                                        logger.info("DOM click dispatch failed: %s", e4)
-                                        click_ok = False
+                            # The floating UI portal overlay is Target's mechanism for blocking
+                            # the button (e.g. item sold out, not available for shipping).
+                            # The button itself has no HTML `disabled` attribute regardless of
+                            # stock state, so bypassing the overlay always produces a false
+                            # positive.  Log the portal content for diagnostics, then treat
+                            # a persistent overlay as "button unavailable".
+                            portal_info = page.evaluate("""
+                                () => Array.from(document.querySelectorAll('[data-floating-ui-portal]'))
+                                          .map(p => ({ id: p.id, text: p.textContent.trim().substring(0, 300) }))
+                            """)
+                            logger.info("Floating UI portal(s) blocking button: %s", portal_info)
+                            logger.info("Overlay persistently intercepts button after page load — treating button as unavailable")
+                            click_ok = False
                         else:
                             logger.info("Click failed for a reason other than overlay interception; not using overlay fallback")
                             click_ok = False
@@ -125,14 +145,6 @@ class Checker:
             if not cart_button:
                 cart_button = soup.find("button", string=lambda text: text and "Add to cart" in text)
 
-            # if cart_button:
-            #     print("--- Button Found Successfully! ---")
-            #     print(f"Tag: {cart_button.name}")
-            #     print(f"Text Content: {cart_button.get_text(strip=True)}")
-            #     print(f"Attributes: {cart_button.attrs}")
-            # else:
-            #     print("Could not locate the button in the rendered HTML structural tree.")
-
             browser.close()
         return cart_button, click_ok
 
@@ -143,9 +155,7 @@ class Checker:
 
         if add_button is not None:
             logger.info("Add-to-cart button found, checking visibility and enabled state")
-            # logger.info(f"Button attributes: {add_button.attrs}")
             is_visible = self._button_is_visible(add_button)
-            # is_disabled = self._button_is_disabled(add_button)
             btn_text = add_button.get_text(strip=True).lower()
             aria_label = add_button.get("aria-label", "").strip()
             logger.info(
@@ -153,7 +163,6 @@ class Checker:
                 add_button.get("class", []),
                 add_button.get("id", ""),
                 add_button.get("data-test", ""),
-                # add_button.get("disabled", ""), 
                 click_ok, 
                 is_visible
             )
