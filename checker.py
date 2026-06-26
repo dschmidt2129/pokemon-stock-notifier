@@ -148,10 +148,25 @@ class Checker:
             browser.close()
         return cart_button, click_ok
 
-    def is_in_stock(self, url):
-
-        # Now check for the add-to-cart button specifically
-        add_button, click_ok = self.get_target_cart_button(url)
+    def is_in_stock(self, url, max_retries=3, retry_delay=3):
+        # Retry the full browser session on transient Playwright errors (e.g. "Target
+        # crashed", "Target page closed").  Each retry recreates the browser from scratch.
+        add_button, click_ok = None, False
+        for attempt in range(1, max_retries + 1):
+            try:
+                add_button, click_ok = self.get_target_cart_button(url)
+                break
+            except Exception as exc:
+                logger.warning(
+                    "get_target_cart_button attempt %d/%d failed for %s: %s",
+                    attempt, max_retries, url, exc,
+                )
+                if attempt < max_retries:
+                    logger.info("Retrying in %ss…", retry_delay)
+                    time.sleep(retry_delay)
+                else:
+                    logger.error("All %d attempts failed for %s", max_retries, url)
+                    return False, f"Checker failed after {max_retries} attempts: {exc}"
 
         if add_button is not None:
             logger.info("Add-to-cart button found, checking visibility and enabled state")
