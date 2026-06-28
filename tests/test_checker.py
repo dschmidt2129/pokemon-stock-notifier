@@ -135,6 +135,7 @@ class TestIsInStock:
 
     def test_out_of_stock_when_no_button_found(self):
         c = self._checker()
+        # (None, False) = page loaded normally but no button present
         c.get_target_cart_button = MagicMock(return_value=(None, False))
         c.fetch = MagicMock(return_value="<html>nothing here</html>")
         in_stock, details = c.is_in_stock(URL)
@@ -155,6 +156,55 @@ class TestIsInStock:
         _, details = c.is_in_stock(URL)
         assert "No clear stock indicators" in details
         assert "Snippet: " in details
+
+    # --- bot-check blocked path ---
+
+    def test_returns_false_when_bot_check_blocks_all_attempts(self):
+        c = self._checker()
+        # (None, None) is the sentinel returned when the overlay never clears
+        c.get_target_cart_button = MagicMock(return_value=(None, None))
+        with patch("checker.time.sleep"):
+            in_stock, details = c.is_in_stock(URL, max_retries=3, retry_delay=0)
+        assert in_stock is False
+        assert "Bot-check overlay blocked all attempts" in details
+
+    def test_bot_check_retries_full_count(self):
+        c = self._checker()
+        c.get_target_cart_button = MagicMock(return_value=(None, None))
+        with patch("checker.time.sleep"):
+            c.is_in_stock(URL, max_retries=3, retry_delay=0)
+        assert c.get_target_cart_button.call_count == 3
+
+    def test_bot_check_sleep_called_between_retries(self):
+        c = self._checker()
+        c.get_target_cart_button = MagicMock(return_value=(None, None))
+        with patch("checker.time.sleep") as mock_sleep:
+            c.is_in_stock(URL, max_retries=3, retry_delay=7)
+        assert mock_sleep.call_count == 2
+        mock_sleep.assert_called_with(7)
+
+    def test_bot_check_succeeds_on_later_attempt(self):
+        """If the first attempt is bot-blocked but a later one succeeds, report in-stock."""
+        c = self._checker()
+        call_count = 0
+        def side_effect(url):
+            nonlocal call_count
+            call_count += 1
+            if call_count < 3:
+                return (None, None)  # bot-blocked
+            return (_shipping_button(), True)
+        c.get_target_cart_button = side_effect
+        with patch("checker.time.sleep"):
+            in_stock, _ = c.is_in_stock(URL, retry_delay=0)
+        assert in_stock is True
+        assert call_count == 3
+
+    def test_bot_check_no_sleep_on_single_attempt(self):
+        c = self._checker()
+        c.get_target_cart_button = MagicMock(return_value=(None, None))
+        with patch("checker.time.sleep") as mock_sleep:
+            c.is_in_stock(URL, max_retries=1, retry_delay=5)
+        mock_sleep.assert_not_called()
 
     # --- retry logic ---
 

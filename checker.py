@@ -79,23 +79,28 @@ class Checker:
                 bot_check_signals = ["loading screen", "almost there", "thank you for your patience", "loading content"]
                 if any(s in portal_text for s in bot_check_signals):
                     logger.info("Target bot-check overlay detected; waiting for it to clear")
-                    page.wait_for_selector(".styles_overlay__AJMdo", state="hidden", timeout=30000)
-                    logger.info("Bot-check overlay cleared")
-                    # After the challenge clears, Target re-renders the page and makes stock
-                    # API calls.  Wait for network idle so the button reaches its final state.
                     try:
-                        page.wait_for_load_state("networkidle", timeout=10000)
-                        logger.info("Network idle reached after bot-check — stock state is final")
-                    except Exception:
-                        logger.info("Network idle timeout after bot-check; proceeding")
-                    # Re-wait for the shipping button in its final post-render state
-                    try:
-                        page.wait_for_selector('button[data-test="shippingButton"]', timeout=8000)
-                        logger.info("Shipping button confirmed present after bot-check re-render")
-                    except Exception:
-                        logger.info("Shipping button not found after bot-check re-render; using current state")
+                        page.wait_for_selector(".styles_overlay__AJMdo", state="hidden", timeout=8000)
+                        logger.info("Bot-check overlay cleared")
+                        # After the challenge clears, Target re-renders the page and makes stock
+                        # API calls.  Wait for network idle so the button reaches its final state.
+                        try:
+                            page.wait_for_load_state("networkidle", timeout=10000)
+                            logger.info("Network idle reached after bot-check — stock state is final")
+                        except Exception:
+                            logger.info("Network idle timeout after bot-check; proceeding")
+                        # Re-wait for the shipping button in its final post-render state
+                        try:
+                            page.wait_for_selector('button[data-test="shippingButton"]', timeout=8000)
+                            logger.info("Shipping button confirmed present after bot-check re-render")
+                        except Exception:
+                            logger.info("Shipping button not found after bot-check re-render; using current state")
+                    except Exception as overlay_e:
+                        logger.warning("Bot-check overlay did not clear (bot likely blocked request): %s", overlay_e)
+                        browser.close()
+                        return None, None
             except Exception as bot_e:
-                logger.info("Bot-check overlay wait result: %s", bot_e)
+                logger.info("Bot-check overlay evaluation error: %s", bot_e)
 
             # Attempt to click the button using Playwright to determine enabled/disabled state
             selector = 'button[data-test="shippingButton"]'
@@ -155,6 +160,18 @@ class Checker:
         for attempt in range(1, max_retries + 1):
             try:
                 add_button, click_ok = self.get_target_cart_button(url)
+                if add_button is None and click_ok is None:
+                    # Bot-check overlay was never cleared; retry after a delay
+                    logger.warning(
+                        "Bot-check blocked attempt %d/%d for %s; retrying in %ss…",
+                        attempt, max_retries, url, retry_delay,
+                    )
+                    if attempt < max_retries:
+                        time.sleep(retry_delay)
+                        continue
+                    else:
+                        logger.error("All %d attempts blocked by bot-check for %s", max_retries, url)
+                        return False, "Bot-check overlay blocked all attempts"
                 break
             except Exception as exc:
                 logger.warning(
