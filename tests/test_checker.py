@@ -1,5 +1,4 @@
 from unittest.mock import MagicMock, patch
-from bs4 import BeautifulSoup
 import pytest
 
 from checker import Checker
@@ -7,15 +6,16 @@ from checker import Checker
 URL = "https://www.target.com/p/some-product/-/A-12345"
 
 
-def _make_button(html):
-    """Parse a button tag from an HTML snippet and return the Tag object."""
-    return BeautifulSoup(html, "html.parser").find("button")
-
-
-def _shipping_button(text="Add to cart", extra_attrs=""):
-    return _make_button(
-        f'<button data-test="shippingButton" {extra_attrs}>{text}</button>'
-    )
+def _shipping_button_dict(text="add to cart", aria_label="", hidden=False, data_test="shippingButton"):
+    """Return a button-info dict as produced by get_target_cart_button."""
+    return {
+        "hidden": hidden,
+        "text": text.strip().lower(),
+        "aria_label": aria_label,
+        "class": "",
+        "id": "",
+        "data_test": data_test,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -44,11 +44,11 @@ class TestCheckerInit:
 
 class TestButtonIsVisible:
     def test_visible_button(self):
-        btn = _make_button("<button>Add to cart</button>")
+        btn = _shipping_button_dict(hidden=False)
         assert Checker()._button_is_visible(btn) is True
 
     def test_hidden_button(self):
-        btn = _make_button('<button hidden>Add to cart</button>')
+        btn = _shipping_button_dict(hidden=True)
         assert Checker()._button_is_visible(btn) is False
 
 
@@ -92,21 +92,19 @@ class TestIsInStock:
 
     def test_in_stock_when_click_ok_and_button_present(self):
         c = self._checker()
-        c.get_target_cart_button = MagicMock(return_value=(_shipping_button(), True))
+        c.get_target_cart_button = MagicMock(return_value=(_shipping_button_dict(), True))
         in_stock, details = c.is_in_stock(URL)
         assert in_stock is True
         assert "click succeeded" in details
 
     def test_details_contains_button_text_when_in_stock(self):
         c = self._checker()
-        c.get_target_cart_button = MagicMock(return_value=(_shipping_button("Add to cart"), True))
+        c.get_target_cart_button = MagicMock(return_value=(_shipping_button_dict(text="Add to cart"), True))
         _, details = c.is_in_stock(URL)
         assert "add to cart" in details
 
     def test_details_falls_back_to_aria_label_when_text_empty(self):
-        btn = _make_button(
-            '<button data-test="shippingButton" aria-label="Add to cart for Widget"> </button>'
-        )
+        btn = _shipping_button_dict(text="", aria_label="Add to cart for Widget")
         c = self._checker()
         c.get_target_cart_button = MagicMock(return_value=(btn, True))
         _, details = c.is_in_stock(URL)
@@ -116,7 +114,7 @@ class TestIsInStock:
 
     def test_out_of_stock_when_click_not_ok(self):
         c = self._checker()
-        c.get_target_cart_button = MagicMock(return_value=(_shipping_button(), False))
+        c.get_target_cart_button = MagicMock(return_value=(_shipping_button_dict(), False))
         in_stock, details = c.is_in_stock(URL)
         assert in_stock is False
         assert "disabled" in details
@@ -124,9 +122,8 @@ class TestIsInStock:
     # --- hidden button path ---
 
     def test_out_of_stock_when_button_hidden(self):
-        btn = _make_button('<button data-test="shippingButton" hidden>Add to cart</button>')
         c = self._checker()
-        c.get_target_cart_button = MagicMock(return_value=(btn, True))
+        c.get_target_cart_button = MagicMock(return_value=(_shipping_button_dict(hidden=True), True))
         in_stock, details = c.is_in_stock(URL)
         assert in_stock is False
         assert "not visible" in details
@@ -192,7 +189,7 @@ class TestIsInStock:
             call_count += 1
             if call_count < 3:
                 return (None, None)  # bot-blocked
-            return (_shipping_button(), True)
+            return (_shipping_button_dict(), True)
         c.get_target_cart_button = side_effect
         with patch("checker.time.sleep"):
             in_stock, _ = c.is_in_stock(URL, retry_delay=0)
@@ -216,7 +213,7 @@ class TestIsInStock:
             call_count += 1
             if call_count < 3:
                 raise RuntimeError("Target crashed")
-            return (_shipping_button(), True)
+            return (_shipping_button_dict(), True)
         c.get_target_cart_button = side_effect
         with patch("checker.time.sleep"):
             in_stock, _ = c.is_in_stock(URL, retry_delay=0)

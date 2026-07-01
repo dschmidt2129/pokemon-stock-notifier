@@ -29,8 +29,8 @@ products:
   - name: "Target Twilight Masquerade 3 Pack Blister"
     url: "https://www.target.com/p/pok-233-mon-trading-card-game-scarlet-38-violet-8212-twilight-masquerade-three-booster-blister-revavroom/-/A-91619920#lnk=sametab"  
   # - name: "Target Test Product"
-  #   url: "https://www.target.com/p/pokemon-sv10-destined-rivals-booster-bundle-2-pack/-/A-1004021933#lnk=sametab"
-interval_seconds: 15
+  #   url: "https://www.target.com/p/pokemon-scarlet-violet-destined-rivals-build-battle-box/-/A-1003610291#lnk=sametab"
+interval_seconds: 1
 check_delay_seconds: 0
 notify_desktop: true
 webhook_url: ""  # set to your webhook URL (Discord, Slack, IFTTT, etc.) to receive JSON payloads

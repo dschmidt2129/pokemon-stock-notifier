@@ -1,5 +1,6 @@
 import time
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from checker import Checker
 from backends import notify_desktop, notify_webhook, notify_email
@@ -29,12 +30,26 @@ def main():
     for product in products:
         logging.info(" - %s: %s", product["name"], product["url"])
 
+    def _check(product):
+        try:
+            in_stock, details = checker.is_in_stock(product["url"])
+            return product, in_stock, details, None
+        except Exception as exc:
+            return product, False, "", exc
+
+    max_concurrent = min(len(products), 4)
     while True:
-        for product in products:
-            url = product["url"]
-            name = product["name"]
-            try:
-                in_stock, details = checker.is_in_stock(url)
+        with ThreadPoolExecutor(max_workers=max_concurrent) as executor:
+            futures = {executor.submit(_check, p): p for p in products}
+            for future in as_completed(futures):
+                product, in_stock, details, exc = future.result()
+                url = product["url"]
+                name = product["name"]
+
+                if exc is not None:
+                    logging.error("Error checking %s: %s", name, exc, exc_info=exc)
+                    continue
+
                 logging.info(
                     "checking stock for item: %s url=%s - in_stock=%s, details=%s",
                     name,
@@ -67,8 +82,6 @@ def main():
                     last_notification_time[url] = now
 
                 last_in_stock[url] = in_stock
-            except Exception as e:
-                logging.exception("Error checking %s: %s", url, e)
 
         time.sleep(interval)
 
