@@ -52,149 +52,144 @@ class Checker:
                 headless=True,
                 args=["--disable-blink-features=AutomationControlled"]
             )
-            
-            # Emulate a standard desktop browser environment
-            context = browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                viewport={"width": 1280, "height": 720}
-            )
-            # Remove the navigator.webdriver flag that headless Chrome exposes
-            context.add_init_script(
-                "Object.defineProperty(navigator, 'webdriver', { get: () => undefined });"
-            )
-            
-            page = context.new_page()
-            
-            print(f"Navigating to: {url}")
-            page.goto(url, wait_until="domcontentloaded")
-            
-            # Target's Add to Cart button relies on data attributes.
-            # We wait until any known candidate selector renders.
-            # Target also applies dynamic content loading, so we wait for the button to appear and is clickable
-            try:
-                page.wait_for_selector(_CART_BUTTON_COMBINED, timeout=10000)
-                logger.info("Add to cart button selector found on the page.")
-            except Exception:
-                print("Timeout waiting for the add to cart button element.")
-
-            # Target shows a bot-detection challenge ("Loading screen / Almost there...")
-            # inside a floating UI portal overlay before revealing the real page state.
-            # On fast machines this overlay is still active when the click is attempted,
-            # causing false results.  Wait for it to clear before proceeding.
-            try:
-                portal_text = page.evaluate("""
-                    () => Array.from(document.querySelectorAll('[data-floating-ui-portal]'))
-                              .map(p => p.textContent.trim().toLowerCase()).join(' ')
-                """)
-                bot_check_signals = ["loading screen", "almost there", "thank you for your patience", "loading content"]
-                if any(s in portal_text for s in bot_check_signals):
-                    logger.info("Target bot-check overlay detected; waiting for it to clear")
-                    try:
-                        page.wait_for_selector(".styles_overlay__AJMdo", state="hidden", timeout=8000)
-                        logger.info("Bot-check overlay cleared")
-                        # After the challenge clears, Target re-renders the page and makes stock
-                        # API calls.  Wait for network idle so the button reaches its final state.
-                        try:
-                            page.wait_for_load_state("networkidle", timeout=5000)
-                            logger.info("Network idle reached after bot-check — stock state is final")
-                        except Exception:
-                            logger.info("Network idle timeout after bot-check; proceeding")
-                        # Re-wait for the shipping button in its final post-render state
-                        try:
-                            page.wait_for_selector(_CART_BUTTON_COMBINED, timeout=8000)
-                            logger.info("Shipping button confirmed present after bot-check re-render")
-                        except Exception:
-                            logger.info("Shipping button not found after bot-check re-render; using current state")
-                    except Exception as overlay_e:
-                        logger.warning("Bot-check overlay did not clear (bot likely blocked request): %s", overlay_e)
-                        browser.close()
-                        return None, None
-            except Exception as bot_e:
-                logger.info("Bot-check overlay evaluation error: %s", bot_e)
-
-            # Resolve whichever known selector is present on the page.
-            click_ok = False
-            active_selector = None
-            element_handle = None
-            for sel in _CART_BUTTON_SELECTORS:
-                handle = page.query_selector(sel)
-                if handle:
-                    active_selector = sel
-                    element_handle = handle
-                    logger.info("Resolved add-to-cart selector: %s", active_selector)
-                    break
-
-            # Fallback: any button with "Add to cart" text
-            if not element_handle:
-                element_handle = page.query_selector('button:text("Add to cart")')
-                if element_handle:
-                    logger.info("Fallback: matched button by 'Add to cart' text")
-
-            if not element_handle:
-                # Dump all button data-test attributes to help diagnose selector changes
-                try:
-                    all_dt = page.evaluate(
-                        "() => Array.from(document.querySelectorAll('button[data-test]'))"
-                        ".map(b => b.getAttribute('data-test'))"
-                    )
-                    logger.warning(
-                        "No known add-to-cart selector matched. "
-                        "Button data-test values on page: %s",
-                        all_dt,
-                    )
-                except Exception as diag_e:
-                    logger.warning("Could not read button data-test values: %s", diag_e)
-                logger.info("Playwright could not find button element for clicking")
-            else:
-                click_target = active_selector or 'button:text("Add to cart")'
-                try:
-                    page.click(click_target, timeout=3000)
-                    logger.info("Normal Playwright click succeeded — button appears enabled")
-                    click_ok = True
-                except Exception as e:
-                    err_text = str(e)
-                    logger.info("Normal Playwright click failed: %s", err_text)
-                    if "intercepts pointer events" in err_text or "intercepting pointer events" in err_text:
-                        # The floating UI portal overlay is Target's mechanism for blocking
-                        # the button (e.g. item sold out, not available for shipping).
-                        # The button itself has no HTML `disabled` attribute regardless of
-                        # stock state, so bypassing the overlay always produces a false
-                        # positive.  Log the portal content for diagnostics, then treat
-                        # a persistent overlay as "button unavailable".
-                        portal_info = page.evaluate("""
-                            () => Array.from(document.querySelectorAll('[data-floating-ui-portal]'))
-                                      .map(p => ({ id: p.id, text: p.textContent.trim().substring(0, 300) }))
-                        """)
-                        logger.info("Floating UI portal(s) blocking button: %s", portal_info)
-                        logger.info("Overlay persistently intercepts button after page load — treating button as unavailable")
-                    else:
-                        logger.info("Click failed for a reason other than overlay interception; not using overlay fallback")
-
-            logger.info("Button Click Check Result: %s", "Enabled" if click_ok else "Disabled or Not Found")
-
-            # Extract button attributes directly from the Playwright handle —
-            # avoids serialising the full page HTML and parsing it with BeautifulSoup.
             btn_info = None
-            if element_handle:
-                try:
-                    # Re-query with the known selector to get a fresh handle after any re-render
-                    if active_selector:
-                        fresh = page.query_selector(active_selector)
-                        if fresh:
-                            element_handle = fresh
-                    btn_info = {
-                        "hidden": element_handle.get_attribute("hidden") is not None,
-                        "text": (element_handle.inner_text() or "").strip().lower(),
-                        "aria_label": (element_handle.get_attribute("aria-label") or "").strip(),
-                        "class": (element_handle.get_attribute("class") or ""),
-                        "id": (element_handle.get_attribute("id") or ""),
-                        "data_test": (element_handle.get_attribute("data-test") or ""),
-                    }
-                    logger.info("Button attributes extracted: data-test=%r", btn_info["data_test"])
-                except Exception as attr_e:
-                    logger.warning("Could not read button attributes from handle: %s", attr_e)
+            click_ok = False
+            try:
+                # Emulate a standard desktop browser environment
+                context = browser.new_context(
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    viewport={"width": 1280, "height": 720}
+                )
+                # Remove the navigator.webdriver flag that headless Chrome exposes
+                context.add_init_script(
+                    "Object.defineProperty(navigator, 'webdriver', { get: () => undefined });"
+                )
 
-            browser.close()
+                page = context.new_page()
+
+                print(f"Navigating to: {url}")
+                # Explicit 30-second navigation timeout so a stalled connection cannot
+                # block the thread indefinitely.
+                page.goto(url, wait_until="domcontentloaded", timeout=30000)
+
+                # Target's Add to Cart button relies on data attributes.
+                # We wait until any known candidate selector renders.
+                # Target also applies dynamic content loading, so we wait for the button to appear and is clickable
+                try:
+                    page.wait_for_selector(_CART_BUTTON_COMBINED, timeout=10000)
+                    logger.info("Add to cart button selector found on the page.")
+                except Exception:
+                    print("Timeout waiting for the add to cart button element.")
+
+                # Target shows a bot-detection challenge ("Loading screen / Almost there...")
+                # inside a floating UI portal overlay before revealing the real page state.
+                # On fast machines this overlay is still active when the click is attempted,
+                # causing false results.  Wait for it to clear before proceeding.
+                try:
+                    portal_text = page.evaluate("""
+                        () => Array.from(document.querySelectorAll('[data-floating-ui-portal]'))
+                                  .map(p => p.textContent.trim().toLowerCase()).join(' ')
+                    """)
+                    bot_check_signals = ["loading screen", "almost there", "thank you for your patience", "loading content"]
+                    if any(s in portal_text for s in bot_check_signals):
+                        logger.info("Target bot-check overlay detected; waiting for it to clear")
+                        try:
+                            page.wait_for_selector(".styles_overlay__AJMdo", state="hidden", timeout=8000)
+                            logger.info("Bot-check overlay cleared")
+                            # After the challenge clears, Target re-renders the page and makes stock
+                            # API calls.  Wait for network idle so the button reaches its final state.
+                            try:
+                                page.wait_for_load_state("networkidle", timeout=5000)
+                                logger.info("Network idle reached after bot-check — stock state is final")
+                            except Exception:
+                                logger.info("Network idle timeout after bot-check; proceeding")
+                            # Re-wait for the shipping button in its final post-render state
+                            try:
+                                page.wait_for_selector(_CART_BUTTON_COMBINED, timeout=8000)
+                                logger.info("Shipping button confirmed present after bot-check re-render")
+                            except Exception:
+                                logger.info("Shipping button not found after bot-check re-render; using current state")
+                        except Exception as overlay_e:
+                            logger.warning("Bot-check overlay did not clear (bot likely blocked request): %s", overlay_e)
+                            return None, None
+                except Exception as bot_e:
+                    logger.info("Bot-check overlay evaluation error: %s", bot_e)
+
+                # Resolve whichever known selector is present on the page.
+                active_selector = None
+                element_handle = None
+                for sel in _CART_BUTTON_SELECTORS:
+                    handle = page.query_selector(sel)
+                    if handle:
+                        active_selector = sel
+                        element_handle = handle
+                        logger.info("Resolved add-to-cart selector: %s", active_selector)
+                        break
+
+                if not element_handle:
+                    # Dump all button data-test attributes to help diagnose selector changes
+                    try:
+                        all_dt = page.evaluate(
+                            "() => Array.from(document.querySelectorAll('button[data-test]'))"
+                            ".map(b => b.getAttribute('data-test'))"
+                        )
+                        logger.warning(
+                            "No known add-to-cart selector matched. "
+                            "Button data-test values on page: %s",
+                            all_dt,
+                        )
+                    except Exception as diag_e:
+                        logger.warning("Could not read button data-test values: %s", diag_e)
+                    logger.info("Playwright could not find button element for clicking")
+                else:
+                    click_target = active_selector
+                    try:
+                        page.click(click_target, timeout=3000)
+                        logger.info("Normal Playwright click succeeded — button appears enabled")
+                        click_ok = True
+                    except Exception as e:
+                        err_text = str(e)
+                        logger.info("Normal Playwright click failed: %s", err_text)
+                        if "intercepts pointer events" in err_text or "intercepting pointer events" in err_text:
+                            # The floating UI portal overlay is Target's mechanism for blocking
+                            # the button (e.g. item sold out, not available for shipping).
+                            # The button itself has no HTML `disabled` attribute regardless of
+                            # stock state, so bypassing the overlay always produces a false
+                            # positive.  Log the portal content for diagnostics, then treat
+                            # a persistent overlay as "button unavailable".
+                            portal_info = page.evaluate("""
+                                () => Array.from(document.querySelectorAll('[data-floating-ui-portal]'))
+                                          .map(p => ({ id: p.id, text: p.textContent.trim().substring(0, 300) }))
+                            """)
+                            logger.info("Floating UI portal(s) blocking button: %s", portal_info)
+                            logger.info("Overlay persistently intercepts button after page load — treating button as unavailable")
+                        else:
+                            logger.info("Click failed for a reason other than overlay interception; not using overlay fallback")
+
+                logger.info("Button Click Check Result: %s", "Enabled" if click_ok else "Disabled or Not Found")
+
+                # Extract button attributes directly from the Playwright handle —
+                # avoids serialising the full page HTML and parsing it with BeautifulSoup.
+                if element_handle:
+                    try:
+                        # Re-query with the known selector to get a fresh handle after any re-render
+                        if active_selector:
+                            fresh = page.query_selector(active_selector)
+                            if fresh:
+                                element_handle = fresh
+                        btn_info = {
+                            "hidden": element_handle.get_attribute("hidden") is not None,
+                            "text": (element_handle.inner_text() or "").strip().lower(),
+                            "aria_label": (element_handle.get_attribute("aria-label") or "").strip(),
+                            "class": (element_handle.get_attribute("class") or ""),
+                            "id": (element_handle.get_attribute("id") or ""),
+                            "data_test": (element_handle.get_attribute("data-test") or ""),
+                        }
+                        logger.info("Button attributes extracted: data-test=%r", btn_info["data_test"])
+                    except Exception as attr_e:
+                        logger.warning("Could not read button attributes from handle: %s", attr_e)
+            finally:
+                browser.close()
         return btn_info, click_ok
 
     def is_in_stock(self, url, max_retries=3, retry_delay=3):

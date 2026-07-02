@@ -1,6 +1,6 @@
 import time
 import logging
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
 
 from checker import Checker
 from backends import notify_desktop, notify_webhook, notify_email
@@ -39,49 +39,58 @@ def main():
 
     max_concurrent = min(len(products), 4)
     while True:
+        # Cap each round so a hung Playwright session cannot block the loop forever.
+        # Allow 15 s per product, minimum 90 s total.
+        per_round_timeout = max(90, len(products) * 15)
         with ThreadPoolExecutor(max_workers=max_concurrent) as executor:
             futures = {executor.submit(_check, p): p for p in products}
-            for future in as_completed(futures):
-                product, in_stock, details, exc = future.result()
-                url = product["url"]
-                name = product["name"]
+            try:
+                for future in as_completed(futures, timeout=per_round_timeout):
+                    product, in_stock, details, exc = future.result()
+                    url = product["url"]
+                    name = product["name"]
 
-                if exc is not None:
-                    logging.error("Error checking %s: %s", name, exc, exc_info=exc)
-                    continue
+                    if exc is not None:
+                        logging.error("Error checking %s: %s", name, exc, exc_info=exc)
+                        continue
 
-                logging.info(
-                    "checking stock for item: %s url=%s - in_stock=%s, details=%s",
-                    name,
-                    url,
-                    in_stock,
-                    details,
+                    logging.info(
+                        "checking stock for item: %s url=%s - in_stock=%s, details=%s",
+                        name,
+                        url,
+                        in_stock,
+                        details,
+                    )
+                    now = time.time()
+
+                    should_notify = False
+                    if in_stock:
+                        if not last_in_stock[url]:
+                            should_notify = True
+                        elif cooldown_seconds and now - last_notification_time[url] >= cooldown_seconds:
+                            should_notify = True
+
+                    if should_notify:
+                        title = f"{name} In Stock"
+                        message = f"{details} -- {url}"
+                        logging.info("In stock! %s", title)
+                        if desktop:
+                            notify_desktop(title, message)
+                        if webhook:
+                            notify_webhook(webhook, {"title": title, "message": message, "url": url, "product": name})
+                        if email_enabled:
+                            body = email_cfg.get("body", "")
+                            if body:
+                                body = body.format(product_name=name, url=url)
+                            notify_email(email_cfg, title, message, body)
+                        last_notification_time[url] = now
+
+                    last_in_stock[url] = in_stock
+            except FuturesTimeoutError:
+                logging.warning(
+                    "Round timed out after %ss — one or more product checks are hung and will be skipped",
+                    per_round_timeout,
                 )
-                now = time.time()
-
-                should_notify = False
-                if in_stock:
-                    if not last_in_stock[url]:
-                        should_notify = True
-                    elif cooldown_seconds and now - last_notification_time[url] >= cooldown_seconds:
-                        should_notify = True
-
-                if should_notify:
-                    title = f"{name} In Stock"
-                    message = f"{details} -- {url}"
-                    logging.info("In stock! %s", title)
-                    if desktop:
-                        notify_desktop(title, message)
-                    if webhook:
-                        notify_webhook(webhook, {"title": title, "message": message, "url": url, "product": name})
-                    if email_enabled:
-                        body = email_cfg.get("body", "")
-                        if body:
-                            body = body.format(product_name=name, url=url)
-                        notify_email(email_cfg, title, message, body)
-                    last_notification_time[url] = now
-
-                last_in_stock[url] = in_stock
 
         time.sleep(interval)
 
