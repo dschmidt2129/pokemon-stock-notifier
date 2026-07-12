@@ -4,3 +4,4 @@ pyyaml
 plyer
 pytest
 playwright
+playwright-stealth

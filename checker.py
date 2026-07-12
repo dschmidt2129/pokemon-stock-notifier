@@ -2,6 +2,7 @@ import logging
 import time
 import requests
 from playwright.sync_api import sync_playwright
+from playwright_stealth import Stealth
 
 # Candidate selectors in priority order.
 # Target occasionally renames these; extend the list if a new attribute is discovered.
@@ -15,6 +16,7 @@ _CART_BUTTON_SELECTORS = [f'button[data-test="{dt}"]' for dt in _CART_BUTTON_DAT
 _CART_BUTTON_COMBINED = ", ".join(_CART_BUTTON_SELECTORS)
 
 logger = logging.getLogger(__name__)
+stealth = Stealth()
 
 
 class Checker:
@@ -44,13 +46,15 @@ class Checker:
 
     def get_target_cart_button(self, url):
         with sync_playwright() as p:
-            # Use the system Chrome browser (channel="chrome") rather than Playwright's
-            # bundled Chromium.  Target's bot-detection permanently blocks bundled Chromium;
-            # real Chrome has the fingerprint needed to pass the challenge.
+            # Use Playwright's bundled Chromium with playwright-stealth for bot-detection bypass.
+            # headless=True on bundled Chromium works reliably on Windows — no visible window.
             browser = p.chromium.launch(
-                channel="chrome",
                 headless=True,
-                args=["--disable-blink-features=AutomationControlled"]
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                    "--disable-dev-shm-usage",
+                    "--no-sandbox",
+                ]
             )
             btn_info = None
             click_ok = False
@@ -66,7 +70,7 @@ class Checker:
                 )
 
                 page = context.new_page()
-
+                stealth.apply_stealth_sync(page)
                 print(f"Navigating to: {url}")
                 # Explicit 30-second navigation timeout so a stalled connection cannot
                 # block the thread indefinitely.
