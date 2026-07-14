@@ -136,6 +136,11 @@ def validate_config(cfg, products):
         if not isinstance(delay, int) or delay < 0:
             raise ValueError("check_delay_seconds must be a non-negative integer")
 
+    if cfg.get("checker_attempt_timeout_seconds") is not None:
+        attempt_timeout = cfg["checker_attempt_timeout_seconds"]
+        if not isinstance(attempt_timeout, int) or attempt_timeout <= 0:
+            raise ValueError("checker_attempt_timeout_seconds must be a positive integer")
+
     email_cfg = cfg.get("email")
     if email_cfg is None:
         return

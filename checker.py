@@ -1,5 +1,7 @@
 import logging
+import threading
 import time
+from queue import Empty, Queue
 import requests
 from playwright.sync_api import sync_playwright
 from playwright_stealth import Stealth
@@ -21,7 +23,14 @@ stealth = Stealth()
 
 class Checker:
     # buffer wait is not working when checking the page contents.  need to find different solution
-    def __init__(self, user_agent=None, timeout=10, load_wait=0, buffer_wait=0):
+    def __init__(
+        self,
+        user_agent=None,
+        timeout=10,
+        load_wait=0,
+        buffer_wait=0,
+        attempt_timeout_seconds=45,
+    ):
         self.user_agent = user_agent or (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
             "(KHTML, like Gecko) Chrome/115.0 Safari/537.36"
@@ -29,6 +38,32 @@ class Checker:
         self.timeout = timeout
         self.load_wait = load_wait
         self.buffer_wait = buffer_wait
+        self.attempt_timeout_seconds = attempt_timeout_seconds
+
+    def _get_target_cart_button_with_timeout(self, url, attempt_timeout_seconds):
+        """Run a single Playwright check in a daemon thread with a hard timeout."""
+        result_queue = Queue(maxsize=1)
+
+        def _worker():
+            try:
+                result_queue.put(("ok", self.get_target_cart_button(url)))
+            except Exception as exc:
+                result_queue.put(("err", exc))
+
+        worker = threading.Thread(target=_worker, daemon=True)
+        worker.start()
+
+        try:
+            status, payload = result_queue.get(timeout=attempt_timeout_seconds)
+        except Empty:
+            raise TimeoutError(
+                f"get_target_cart_button exceeded {attempt_timeout_seconds}s for {url}"
+            )
+
+        if status == "err":
+            raise payload
+
+        return payload
 
     def _button_is_visible(self, button):
         logger.info("Checking button visibility")
@@ -196,13 +231,18 @@ class Checker:
                 browser.close()
         return btn_info, click_ok
 
-    def is_in_stock(self, url, max_retries=3, retry_delay=3):
+    def is_in_stock(self, url, max_retries=3, retry_delay=3, attempt_timeout_seconds=None):
         # Retry the full browser session on transient Playwright errors (e.g. "Target
         # crashed", "Target page closed").  Each retry recreates the browser from scratch.
+        if attempt_timeout_seconds is None:
+            attempt_timeout_seconds = self.attempt_timeout_seconds
+
         add_button, click_ok = None, False
         for attempt in range(1, max_retries + 1):
             try:
-                add_button, click_ok = self.get_target_cart_button(url)
+                add_button, click_ok = self._get_target_cart_button_with_timeout(
+                    url, attempt_timeout_seconds
+                )
                 if add_button is None and click_ok is None:
                     # Bot-check overlay was never cleared; retry after a delay
                     logger.warning(

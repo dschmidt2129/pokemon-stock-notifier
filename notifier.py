@@ -22,7 +22,12 @@ def main():
     cooldown_minutes = cfg.get("stock_notification_cooldown_minutes", 5)
     cooldown_seconds = cooldown_minutes * 60
     check_delay = cfg.get("check_delay_seconds", 5)
-    checker = Checker(user_agent=cfg.get("user_agent"), load_wait=check_delay)
+    checker_attempt_timeout = cfg.get("checker_attempt_timeout_seconds", 45)
+    checker = Checker(
+        user_agent=cfg.get("user_agent"),
+        load_wait=check_delay,
+        attempt_timeout_seconds=checker_attempt_timeout,
+    )
     last_in_stock = {product["url"]: False for product in products}
     last_notification_time = {product["url"]: 0.0 for product in products}
 
@@ -42,7 +47,9 @@ def main():
         # Cap each round so a hung Playwright session cannot block the loop forever.
         # Allow 15 s per product, minimum 90 s total.
         per_round_timeout = max(90, len(products) * 15)
-        with ThreadPoolExecutor(max_workers=max_concurrent) as executor:
+        executor = ThreadPoolExecutor(max_workers=max_concurrent)
+        futures = {}
+        try:
             futures = {executor.submit(_check, p): p for p in products}
             try:
                 for future in as_completed(futures, timeout=per_round_timeout):
@@ -87,10 +94,20 @@ def main():
 
                     last_in_stock[url] = in_stock
             except FuturesTimeoutError:
+                unfinished = sum(1 for future in futures if not future.done())
                 logging.warning(
-                    "Round timed out after %ss — one or more product checks are hung and will be skipped",
+                    "Round timed out after %ss — %s product check(s) still running; skipping them",
                     per_round_timeout,
+                    unfinished,
                 )
+        finally:
+            # Do not block on shutdown when any worker is stuck in Playwright.
+            # Running tasks cannot be force-cancelled in a thread pool, but this
+            # keeps the outer loop responsive and lets the next round proceed.
+            for future in futures:
+                if not future.done():
+                    future.cancel()
+            executor.shutdown(wait=False, cancel_futures=True)
 
         time.sleep(interval)
 

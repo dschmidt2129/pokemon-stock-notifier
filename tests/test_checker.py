@@ -37,6 +37,12 @@ class TestCheckerInit:
     def test_custom_timeout(self):
         assert Checker(timeout=30).timeout == 30
 
+    def test_default_attempt_timeout(self):
+        assert Checker().attempt_timeout_seconds == 45
+
+    def test_custom_attempt_timeout(self):
+        assert Checker(attempt_timeout_seconds=12).attempt_timeout_seconds == 12
+
 
 # ---------------------------------------------------------------------------
 # Checker._button_is_visible
@@ -257,3 +263,28 @@ class TestIsInStock:
         with patch("checker.time.sleep"):
             _, details = c.is_in_stock(URL, max_retries=1)
         assert "Target crashed" in details
+
+    def test_returns_false_after_timeout_retries_exhausted(self):
+        c = self._checker()
+        c._get_target_cart_button_with_timeout = MagicMock(
+            side_effect=TimeoutError("timed out")
+        )
+        with patch("checker.time.sleep"):
+            in_stock, details = c.is_in_stock(URL, max_retries=2, retry_delay=0)
+        assert in_stock is False
+        assert "2 attempts" in details
+        assert "timed out" in details
+
+    def test_uses_instance_attempt_timeout_default(self):
+        c = Checker(attempt_timeout_seconds=17)
+
+        captured = {}
+
+        def side_effect(url, timeout_seconds):
+            captured["timeout_seconds"] = timeout_seconds
+            return _shipping_button_dict(), True
+
+        c._get_target_cart_button_with_timeout = MagicMock(side_effect=side_effect)
+        in_stock, _ = c.is_in_stock(URL, max_retries=1)
+        assert in_stock is True
+        assert captured["timeout_seconds"] == 17

@@ -46,6 +46,14 @@ Optional cooldown example:
 stock_notification_cooldown_minutes: 5
 ```
 
+Optional checker timeout example:
+
+```yaml
+checker_attempt_timeout_seconds: 45
+```
+
+This per-product timeout ensures a stuck browser check fails fast and the notifier loop continues.
+
 The notifier sends email notifications for each product when stock is first detected and will resend after the configured cooldown if the product remains in stock.
 
 - The checker uses simple heuristics and may need adjustment for specific product pages. Edit `checker.py` to refine selectors or keywords.

@@ -47,6 +47,13 @@ def test_validate_config_rejects_negative_cooldown():
         validate_config(cfg, products)
 
 
+def test_validate_config_rejects_nonpositive_checker_attempt_timeout():
+    cfg = {"checker_attempt_timeout_seconds": 0}
+    products = [{"name": "Example", "url": "https://example.com"}]
+    with pytest.raises(ValueError, match="checker_attempt_timeout_seconds must be a positive integer"):
+        validate_config(cfg, products)
+
+
 def test_validate_config_rejects_email_mapping_type():
     cfg = {"email": "not-a-map"}
     products = [{"name": "Example", "url": "https://example.com"}]
