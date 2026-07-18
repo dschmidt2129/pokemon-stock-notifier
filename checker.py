@@ -17,6 +17,19 @@ _CART_BUTTON_DATA_TESTS = [
 _CART_BUTTON_SELECTORS = [f'button[data-test="{dt}"]' for dt in _CART_BUTTON_DATA_TESTS]
 _CART_BUTTON_COMBINED = ", ".join(_CART_BUTTON_SELECTORS)
 
+_OUT_OF_STOCK_TERMS = [
+    "alternative",
+    "alternatives",
+    "sold out",
+    "out of stock",
+    "check stores",
+    "check nearby stores",
+    "notify me",
+    "see similar",
+    "currently out of stock",
+    "unavailable",
+]
+
 logger = logging.getLogger(__name__)
 stealth = Stealth()
 
@@ -72,6 +85,83 @@ class Checker:
             return False
         logger.info("Button does not have 'hidden' attribute, assuming it is visible")
         return True
+
+    def _button_indicates_out_of_stock(self, button):
+        if not button:
+            return False
+        text = str(button.get("text") or "").lower()
+        aria_label = str(button.get("aria_label") or button.get("aria-label") or "").lower()
+        data_test = str(button.get("data_test") or button.get("data-test") or "").lower()
+        combined = f"{text} {aria_label} {data_test}"
+        return any(term in combined for term in _OUT_OF_STOCK_TERMS)
+
+    def _handle_indicates_out_of_stock(self, handle):
+        if not handle:
+            return False
+        try:
+            text = (handle.inner_text() or "").strip().lower()
+            aria_label = (handle.get_attribute("aria-label") or handle.get_attribute("aria_label") or "").strip().lower()
+            data_test = (handle.get_attribute("data-test") or handle.get_attribute("data_test") or "").strip().lower()
+            combined = f"{text} {aria_label} {data_test}"
+            return any(term in combined for term in _OUT_OF_STOCK_TERMS)
+        except Exception:
+            return False
+
+    def _handle_is_visible(self, handle):
+        if not handle:
+            return False
+        try:
+            return handle.is_visible()
+        except Exception:
+            return False
+
+    def _handle_is_enabled(self, handle):
+        if not handle:
+            return False
+        try:
+            return handle.is_enabled()
+        except Exception:
+            return False
+
+    def _select_cart_button_handle(self, page):
+        active_selector = None
+        element_handle = None
+        fallback_selector = None
+        fallback_handle = None
+        fallback_visible = False
+
+        for sel in _CART_BUTTON_SELECTORS:
+            for handle in page.query_selector_all(sel):
+                is_visible = self._handle_is_visible(handle)
+                is_enabled = self._handle_is_enabled(handle)
+                is_out_of_stock = self._handle_indicates_out_of_stock(handle)
+
+                if is_visible and is_enabled and not is_out_of_stock:
+                    logger.info("Resolved active buy add-to-cart selector: %s", sel)
+                    return sel, handle
+
+                if is_visible and (fallback_handle is None or not fallback_visible):
+                    fallback_selector = sel
+                    fallback_handle = handle
+                    fallback_visible = True
+                    logger.info(
+                        "Found visible cart candidate with fallback state: selector=%s enabled=%s out_of_stock=%s",
+                        sel,
+                        is_enabled,
+                        is_out_of_stock,
+                    )
+
+                if fallback_handle is None:
+                    fallback_selector = sel
+                    fallback_handle = handle
+
+        if fallback_handle:
+            logger.info(
+                "No active buy button found; using fallback cart button selector: %s",
+                fallback_selector,
+            )
+
+        return fallback_selector, fallback_handle
 
     def fetch(self, url):
         headers = {"User-Agent": self.user_agent}
@@ -155,15 +245,7 @@ class Checker:
                     logger.info("Bot-check overlay evaluation error: %s", bot_e)
 
                 # Resolve whichever known selector is present on the page.
-                active_selector = None
-                element_handle = None
-                for sel in _CART_BUTTON_SELECTORS:
-                    handle = page.query_selector(sel)
-                    if handle:
-                        active_selector = sel
-                        element_handle = handle
-                        logger.info("Resolved add-to-cart selector: %s", active_selector)
-                        break
+                active_selector, element_handle = self._select_cart_button_handle(page)
 
                 if not element_handle:
                     # Dump all button data-test attributes to help diagnose selector changes
@@ -183,9 +265,19 @@ class Checker:
                 else:
                     click_target = active_selector
                     try:
-                        page.click(click_target, timeout=3000)
-                        logger.info("Normal Playwright click succeeded — button appears enabled")
-                        click_ok = True
+                        if self._handle_indicates_out_of_stock(element_handle):
+                            logger.info("Button text indicates out-of-stock or alternative; skipping click test")
+                            click_ok = False
+                        elif not self._handle_is_visible(element_handle):
+                            logger.info("Button is not visible; skipping click test")
+                            click_ok = False
+                        elif not self._handle_is_enabled(element_handle):
+                            logger.info("Button is not enabled; skipping click test")
+                            click_ok = False
+                        else:
+                            page.click(click_target, timeout=3000)
+                            logger.info("Normal Playwright click succeeded — button appears enabled")
+                            click_ok = True
                     except Exception as e:
                         err_text = str(e)
                         logger.info("Normal Playwright click failed: %s", err_text)
@@ -211,11 +303,11 @@ class Checker:
                 # avoids serialising the full page HTML and parsing it with BeautifulSoup.
                 if element_handle:
                     try:
-                        # Re-query with the known selector to get a fresh handle after any re-render
-                        if active_selector:
-                            fresh = page.query_selector(active_selector)
-                            if fresh:
-                                element_handle = fresh
+                        # Re-evaluate the active cart control after any page re-render.
+                        fresh_selector, fresh_handle = self._select_cart_button_handle(page)
+                        if fresh_handle:
+                            active_selector = fresh_selector
+                            element_handle = fresh_handle
                         btn_info = {
                             "hidden": element_handle.get_attribute("hidden") is not None,
                             "text": (element_handle.inner_text() or "").strip().lower(),
@@ -281,6 +373,9 @@ class Checker:
                 click_ok,
                 is_visible
             )
+            if self._button_indicates_out_of_stock(add_button):
+                logger.info("Add-to-cart button indicates out of stock or alternative: %r / %r", btn_text, aria_label)
+                return False, f"Found button, but it indicates item is out of stock or alternative: {btn_text or aria_label}"
             if not click_ok:
                 logger.info("Add-to-cart button is disabled")
                 return False, "Found add-to-cart button, but it is disabled"

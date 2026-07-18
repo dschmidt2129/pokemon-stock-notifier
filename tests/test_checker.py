@@ -11,7 +11,7 @@ def _shipping_button_dict(text="add to cart", aria_label="", hidden=False, data_
     return {
         "hidden": hidden,
         "text": text.strip().lower(),
-        "aria_label": aria_label,
+        "aria_label": aria_label.strip(),
         "class": "",
         "id": "",
         "data_test": data_test,
@@ -56,6 +56,101 @@ class TestButtonIsVisible:
     def test_hidden_button(self):
         btn = _shipping_button_dict(hidden=True)
         assert Checker()._button_is_visible(btn) is False
+
+
+# ---------------------------------------------------------------------------
+# Checker._button_indicates_out_of_stock & _handle_indicates_out_of_stock
+# ---------------------------------------------------------------------------
+
+class TestButtonIndicatesOutOfStock:
+    def test_find_alternative_in_text(self):
+        btn = _shipping_button_dict(text="Find Alternative")
+        assert Checker()._button_indicates_out_of_stock(btn) is True
+
+    def test_find_alternatives_in_aria_label(self):
+        btn = _shipping_button_dict(text="", aria_label="Find alternatives for Twilight Masquerade ETB")
+        assert Checker()._button_indicates_out_of_stock(btn) is True
+
+    def test_sold_out(self):
+        btn = _shipping_button_dict(text="Sold out")
+        assert Checker()._button_indicates_out_of_stock(btn) is True
+
+    def test_check_stores(self):
+        btn = _shipping_button_dict(text="Check stores")
+        assert Checker()._button_indicates_out_of_stock(btn) is True
+
+    def test_normal_buy_button_not_out_of_stock(self):
+        btn = _shipping_button_dict(text="Ship it")
+        assert Checker()._button_indicates_out_of_stock(btn) is False
+
+    def test_none_or_empty(self):
+        assert Checker()._button_indicates_out_of_stock(None) is False
+        assert Checker()._button_indicates_out_of_stock({}) is False
+
+    def test_handle_indicates_out_of_stock(self):
+        handle = MagicMock()
+        handle.inner_text.return_value = "Find Alternative"
+        handle.get_attribute.return_value = ""
+        assert Checker()._handle_indicates_out_of_stock(handle) is True
+
+        handle.inner_text.return_value = "Add to cart"
+        assert Checker()._handle_indicates_out_of_stock(handle) is False
+
+
+class TestSelectCartButtonHandle:
+    def _handle(
+        self,
+        text,
+        *,
+        visible=True,
+        enabled=True,
+        aria_label="",
+        data_test="shippingButton",
+    ):
+        handle = MagicMock()
+        handle.inner_text.return_value = text
+        attrs = {
+            "aria-label": aria_label,
+            "aria_label": aria_label,
+            "data-test": data_test,
+            "data_test": data_test,
+        }
+        handle.get_attribute.side_effect = lambda name: attrs.get(name, "")
+        handle.is_visible.return_value = visible
+        handle.is_enabled.return_value = enabled
+        return handle
+
+    def test_prefers_visible_enabled_buy_button(self):
+        alternative = self._handle("Find Alternative")
+        buy = self._handle("Add to cart")
+        page = MagicMock()
+        page.query_selector_all.side_effect = lambda sel: [alternative, buy] if sel == 'button[data-test="shippingButton"]' else []
+
+        selector, handle = Checker()._select_cart_button_handle(page)
+
+        assert selector == 'button[data-test="shippingButton"]'
+        assert handle is buy
+
+    def test_ignores_hidden_buy_button_and_uses_visible_fallback(self):
+        hidden_buy = self._handle("Add to cart", visible=False)
+        alternative = self._handle("Find Alternative", visible=True)
+        page = MagicMock()
+        page.query_selector_all.side_effect = lambda sel: [hidden_buy, alternative] if sel == 'button[data-test="shippingButton"]' else []
+
+        selector, handle = Checker()._select_cart_button_handle(page)
+
+        assert selector == 'button[data-test="shippingButton"]'
+        assert handle is alternative
+
+    def test_returns_visible_alternative_when_no_buy_button_exists(self):
+        alternative = self._handle("Find Alternative")
+        page = MagicMock()
+        page.query_selector_all.side_effect = lambda sel: [alternative] if sel == 'button[data-test="shippingButton"]' else []
+
+        selector, handle = Checker()._select_cart_button_handle(page)
+
+        assert selector == 'button[data-test="shippingButton"]'
+        assert handle is alternative
 
 
 # ---------------------------------------------------------------------------
@@ -133,6 +228,22 @@ class TestIsInStock:
         in_stock, details = c.is_in_stock(URL)
         assert in_stock is False
         assert "not visible" in details
+
+    # --- out of stock / alternative button path ---
+
+    def test_out_of_stock_when_button_is_find_alternative(self):
+        c = self._checker()
+        c.get_target_cart_button = MagicMock(return_value=(_shipping_button_dict(text="Find Alternative"), True))
+        in_stock, details = c.is_in_stock(URL)
+        assert in_stock is False
+        assert "out of stock or alternative" in details
+
+    def test_out_of_stock_when_button_aria_label_indicates_sold_out(self):
+        c = self._checker()
+        c.get_target_cart_button = MagicMock(return_value=(_shipping_button_dict(text="", aria_label="Sold out online"), True))
+        in_stock, details = c.is_in_stock(URL)
+        assert in_stock is False
+        assert "out of stock or alternative" in details
 
     # --- no button found path ---
 
