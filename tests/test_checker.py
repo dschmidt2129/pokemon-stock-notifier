@@ -6,7 +6,13 @@ from checker import Checker
 URL = "https://www.target.com/p/some-product/-/A-12345"
 
 
-def _shipping_button_dict(text="add to cart", aria_label="", hidden=False, data_test="shippingButton"):
+def _shipping_button_dict(
+    text="add to cart",
+    aria_label="",
+    hidden=False,
+    data_test="shippingButton",
+    page_stock_term="",
+):
     """Return a button-info dict as produced by get_target_cart_button."""
     return {
         "hidden": hidden,
@@ -15,6 +21,7 @@ def _shipping_button_dict(text="add to cart", aria_label="", hidden=False, data_
         "class": "",
         "id": "",
         "data_test": data_test,
+        "page_stock_term": page_stock_term,
     }
 
 
@@ -77,6 +84,10 @@ class TestButtonIndicatesOutOfStock:
 
     def test_check_stores(self):
         btn = _shipping_button_dict(text="Check stores")
+        assert Checker()._button_indicates_out_of_stock(btn) is True
+
+    def test_page_stock_term_marks_button_out_of_stock(self):
+        btn = _shipping_button_dict(text="Add to cart", page_stock_term="out of stock")
         assert Checker()._button_indicates_out_of_stock(btn) is True
 
     def test_normal_buy_button_not_out_of_stock(self):
@@ -244,6 +255,16 @@ class TestIsInStock:
         in_stock, details = c.is_in_stock(URL)
         assert in_stock is False
         assert "out of stock or alternative" in details
+
+    def test_out_of_stock_when_page_text_indicates_out_of_stock(self):
+        c = self._checker()
+        c.get_target_cart_button = MagicMock(
+            return_value=(_shipping_button_dict(text="Add to cart", page_stock_term="out of stock"), True)
+        )
+        in_stock, details = c.is_in_stock(URL)
+        assert in_stock is False
+        assert "out of stock or alternative" in details
+        assert "out of stock" in details
 
     # --- no button found path ---
 

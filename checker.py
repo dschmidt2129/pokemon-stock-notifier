@@ -86,26 +86,49 @@ class Checker:
         logger.info("Button does not have 'hidden' attribute, assuming it is visible")
         return True
 
+    def _find_out_of_stock_term(self, *parts):
+        combined = " ".join(str(part or "").strip().lower() for part in parts)
+        for term in _OUT_OF_STOCK_TERMS:
+            if term in combined:
+                return term
+        return None
+
     def _button_indicates_out_of_stock(self, button):
         if not button:
             return False
-        text = str(button.get("text") or "").lower()
-        aria_label = str(button.get("aria_label") or button.get("aria-label") or "").lower()
-        data_test = str(button.get("data_test") or button.get("data-test") or "").lower()
-        combined = f"{text} {aria_label} {data_test}"
-        return any(term in combined for term in _OUT_OF_STOCK_TERMS)
+        matched_term = self._find_out_of_stock_term(
+            button.get("text"),
+            button.get("aria_label") or button.get("aria-label"),
+            button.get("data_test") or button.get("data-test"),
+            button.get("page_stock_term"),
+        )
+        return matched_term is not None
 
     def _handle_indicates_out_of_stock(self, handle):
         if not handle:
             return False
         try:
-            text = (handle.inner_text() or "").strip().lower()
-            aria_label = (handle.get_attribute("aria-label") or handle.get_attribute("aria_label") or "").strip().lower()
-            data_test = (handle.get_attribute("data-test") or handle.get_attribute("data_test") or "").strip().lower()
-            combined = f"{text} {aria_label} {data_test}"
-            return any(term in combined for term in _OUT_OF_STOCK_TERMS)
+            matched_term = self._find_out_of_stock_term(
+                handle.inner_text(),
+                handle.get_attribute("aria-label") or handle.get_attribute("aria_label"),
+                handle.get_attribute("data-test") or handle.get_attribute("data_test"),
+            )
+            return matched_term is not None
         except Exception:
             return False
+
+    def _get_page_out_of_stock_term(self, page):
+        try:
+            page_text = page.evaluate(
+                "() => document.body ? document.body.innerText : ''"
+            )
+        except Exception:
+            return None
+
+        matched_term = self._find_out_of_stock_term(page_text)
+        if matched_term:
+            logger.info("Page text indicates out of stock: %s", matched_term)
+        return matched_term
 
     def _handle_is_visible(self, handle):
         if not handle:
@@ -244,6 +267,8 @@ class Checker:
                 except Exception as bot_e:
                     logger.info("Bot-check overlay evaluation error: %s", bot_e)
 
+                page_stock_term = self._get_page_out_of_stock_term(page)
+
                 # Resolve whichever known selector is present on the page.
                 active_selector, element_handle = self._select_cart_button_handle(page)
 
@@ -315,6 +340,7 @@ class Checker:
                             "class": (element_handle.get_attribute("class") or ""),
                             "id": (element_handle.get_attribute("id") or ""),
                             "data_test": (element_handle.get_attribute("data-test") or ""),
+                            "page_stock_term": page_stock_term or "",
                         }
                         logger.info("Button attributes extracted: data-test=%r", btn_info["data_test"])
                     except Exception as attr_e:
@@ -375,7 +401,8 @@ class Checker:
             )
             if self._button_indicates_out_of_stock(add_button):
                 logger.info("Add-to-cart button indicates out of stock or alternative: %r / %r", btn_text, aria_label)
-                return False, f"Found button, but it indicates item is out of stock or alternative: {btn_text or aria_label}"
+                stock_signal = btn_text or aria_label or add_button.get("page_stock_term") or "out of stock"
+                return False, f"Found button, but it indicates item is out of stock or alternative: {stock_signal}"
             if not click_ok:
                 logger.info("Add-to-cart button is disabled")
                 return False, "Found add-to-cart button, but it is disabled"
