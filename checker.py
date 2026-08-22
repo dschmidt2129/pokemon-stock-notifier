@@ -1,7 +1,10 @@
 import logging
 import threading
 import time
+from dataclasses import dataclass
+from enum import Enum
 from queue import Empty, Queue
+from urllib.parse import urlparse
 import requests
 from playwright.sync_api import sync_playwright
 from playwright_stealth import Stealth
@@ -16,6 +19,13 @@ _CART_BUTTON_DATA_TESTS = [
 ]
 _CART_BUTTON_SELECTORS = [f'button[data-test="{dt}"]' for dt in _CART_BUTTON_DATA_TESTS]
 _CART_BUTTON_COMBINED = ", ".join(_CART_BUTTON_SELECTORS)
+_WALMART_CART_BUTTON_SELECTORS = [
+    'button[data-automation-id="add-to-cart"]',
+    'button[data-automation-id="atc-button"]',
+    'button[data-automation-id="shippingButton"]',
+    'button[data-testid*="add-to-cart" i]',
+    'button[aria-label*="add to cart" i]',
+]
 
 _OUT_OF_STOCK_TERMS = [
     "alternative",
@@ -29,9 +39,30 @@ _OUT_OF_STOCK_TERMS = [
     "currently out of stock",
     "unavailable",
 ]
+_BOT_CHECK_TERMS = [
+    "robot or human",
+    "verify you are human",
+    "verify you're human",
+    "are you a robot",
+    "captcha",
+]
 
 logger = logging.getLogger(__name__)
 stealth = Stealth()
+
+
+class StockStatus(str, Enum):
+    IN_STOCK = "in_stock"
+    OUT_OF_STOCK = "out_of_stock"
+    UNKNOWN = "unknown"
+    BLOCKED = "blocked"
+
+
+@dataclass(frozen=True)
+class StockResult:
+    status: StockStatus
+    details: str
+    source: str = "browser"
 
 
 class Checker:
@@ -130,6 +161,25 @@ class Checker:
             logger.info("Page text indicates out of stock: %s", matched_term)
         return matched_term
 
+    def _get_bot_check_signal(self, page):
+        try:
+            title = page.title()
+            body_text = page.evaluate(
+                "() => document.body ? document.body.innerText : ''"
+            )
+        except Exception:
+            return None
+
+        combined_text = f"{title} {body_text}".lower()
+        return next(
+            (
+                term
+                for term in _BOT_CHECK_TERMS
+                if term in combined_text
+            ),
+            None,
+        )
+
     def _handle_is_visible(self, handle):
         if not handle:
             return False
@@ -146,14 +196,15 @@ class Checker:
         except Exception:
             return False
 
-    def _select_cart_button_handle(self, page):
+    def _select_cart_button_handle(self, page, selectors=None):
+        selectors = selectors or _CART_BUTTON_SELECTORS
         active_selector = None
         element_handle = None
         fallback_selector = None
         fallback_handle = None
         fallback_visible = False
 
-        for sel in _CART_BUTTON_SELECTORS:
+        for sel in selectors:
             for handle in page.query_selector_all(sel):
                 is_visible = self._handle_is_visible(handle)
                 is_enabled = self._handle_is_enabled(handle)
@@ -186,6 +237,12 @@ class Checker:
 
         return fallback_selector, fallback_handle
 
+    def _selectors_for_url(self, url):
+        hostname = (urlparse(url).hostname or "").lower()
+        if hostname == "walmart.com" or hostname.endswith(".walmart.com"):
+            return _WALMART_CART_BUTTON_SELECTORS
+        return _CART_BUTTON_SELECTORS
+
     def fetch(self, url):
         headers = {"User-Agent": self.user_agent}
         resp = requests.get(url, headers=headers, timeout=self.timeout)
@@ -207,6 +264,8 @@ class Checker:
             btn_info = None
             click_ok = False
             try:
+                cart_selectors = self._selectors_for_url(url)
+                cart_selector_combined = ", ".join(cart_selectors)
                 # Emulate a standard desktop browser environment
                 context = browser.new_context(
                     user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -224,11 +283,20 @@ class Checker:
                 # block the thread indefinitely.
                 page.goto(url, wait_until="domcontentloaded", timeout=30000)
 
-                # Target's Add to Cart button relies on data attributes.
+                bot_check_signal = self._get_bot_check_signal(page)
+                if bot_check_signal:
+                    logger.warning(
+                        "Bot-check page detected (%s); treating result as blocked: %s",
+                        bot_check_signal,
+                        url,
+                    )
+                    return None, None
+
+                # Product pages expose fulfillment controls through provider-specific attributes.
                 # We wait until any known candidate selector renders.
                 # Target also applies dynamic content loading, so we wait for the button to appear and is clickable
                 try:
-                    page.wait_for_selector(_CART_BUTTON_COMBINED, timeout=10000)
+                    page.wait_for_selector(cart_selector_combined, timeout=10000)
                     logger.info("Add to cart button selector found on the page.")
                 except Exception:
                     print("Timeout waiting for the add to cart button element.")
@@ -257,7 +325,7 @@ class Checker:
                                 logger.info("Network idle timeout after bot-check; proceeding")
                             # Re-wait for the shipping button in its final post-render state
                             try:
-                                page.wait_for_selector(_CART_BUTTON_COMBINED, timeout=8000)
+                                page.wait_for_selector(cart_selector_combined, timeout=8000)
                                 logger.info("Shipping button confirmed present after bot-check re-render")
                             except Exception:
                                 logger.info("Shipping button not found after bot-check re-render; using current state")
@@ -270,7 +338,9 @@ class Checker:
                 page_stock_term = self._get_page_out_of_stock_term(page)
 
                 # Resolve whichever known selector is present on the page.
-                active_selector, element_handle = self._select_cart_button_handle(page)
+                active_selector, element_handle = self._select_cart_button_handle(
+                    page, cart_selectors
+                )
 
                 if not element_handle:
                     # Dump all button data-test attributes to help diagnose selector changes
@@ -329,7 +399,9 @@ class Checker:
                 if element_handle:
                     try:
                         # Re-evaluate the active cart control after any page re-render.
-                        fresh_selector, fresh_handle = self._select_cart_button_handle(page)
+                        fresh_selector, fresh_handle = self._select_cart_button_handle(
+                            page, cart_selectors
+                        )
                         if fresh_handle:
                             active_selector = fresh_selector
                             element_handle = fresh_handle
@@ -348,6 +420,24 @@ class Checker:
             finally:
                 browser.close()
         return btn_info, click_ok
+
+    def check(self, url, max_retries=3, retry_delay=3, attempt_timeout_seconds=None):
+        """Return a four-state result while preserving the legacy is_in_stock API."""
+        in_stock, details = self.is_in_stock(
+            url,
+            max_retries=max_retries,
+            retry_delay=retry_delay,
+            attempt_timeout_seconds=attempt_timeout_seconds,
+        )
+        if in_stock:
+            status = StockStatus.IN_STOCK
+        elif "bot-check" in details.lower() or "blocked" in details.lower():
+            status = StockStatus.BLOCKED
+        elif "out of stock" in details.lower() or "alternative" in details.lower():
+            status = StockStatus.OUT_OF_STOCK
+        else:
+            status = StockStatus.UNKNOWN
+        return StockResult(status=status, details=details)
 
     def is_in_stock(self, url, max_retries=3, retry_delay=3, attempt_timeout_seconds=None):
         # Retry the full browser session on transient Playwright errors (e.g. "Target

@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock, patch
 import pytest
 
-from checker import Checker
+from checker import Checker, StockStatus
 
 URL = "https://www.target.com/p/some-product/-/A-12345"
 
@@ -153,6 +153,19 @@ class TestSelectCartButtonHandle:
         assert selector == 'button[data-test="shippingButton"]'
         assert handle is alternative
 
+    def test_selects_walmart_add_to_cart_selector(self):
+        buy = self._handle("Add to cart", data_test="")
+        page = MagicMock()
+        walmart_selector = 'button[data-automation-id="add-to-cart"]'
+        page.query_selector_all.side_effect = lambda sel: [buy] if sel == walmart_selector else []
+
+        selector, handle = Checker()._select_cart_button_handle(
+            page, [walmart_selector]
+        )
+
+        assert selector == walmart_selector
+        assert handle is buy
+
     def test_returns_visible_alternative_when_no_buy_button_exists(self):
         alternative = self._handle("Find Alternative")
         page = MagicMock()
@@ -163,6 +176,40 @@ class TestSelectCartButtonHandle:
         assert selector == 'button[data-test="shippingButton"]'
         assert handle is alternative
 
+
+class TestWalmartSupport:
+    def test_walmart_urls_use_walmart_selectors(self):
+        selectors = Checker()._selectors_for_url("https://www.walmart.com/ip/example/123")
+        assert 'button[data-automation-id="add-to-cart"]' in selectors
+
+    def test_non_walmart_urls_keep_existing_selectors(self):
+        selectors = Checker()._selectors_for_url("https://www.target.com/p/example/-/A-123")
+        assert selectors[0] == 'button[data-test="shippingButton"]'
+
+    def test_check_classifies_blocked_result(self):
+        checker = Checker()
+        checker.is_in_stock = MagicMock(
+            return_value=(False, "Bot-check overlay blocked all attempts")
+        )
+
+        result = checker.check("https://www.walmart.com/ip/example/123")
+
+        assert result.status is StockStatus.BLOCKED
+
+    def test_check_classifies_in_stock_result(self):
+        checker = Checker()
+        checker.is_in_stock = MagicMock(return_value=(True, "Add to cart"))
+
+        result = checker.check("https://www.walmart.com/ip/example/123")
+
+        assert result.status is StockStatus.IN_STOCK
+
+    def test_robot_or_human_page_is_detected_as_bot_check(self):
+        page = MagicMock()
+        page.title.return_value = "Robot or human?"
+        page.evaluate.return_value = "Please verify you are human"
+
+        assert Checker()._get_bot_check_signal(page) == "robot or human"
 
 # ---------------------------------------------------------------------------
 # Checker.fetch

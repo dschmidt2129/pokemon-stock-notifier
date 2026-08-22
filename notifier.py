@@ -2,7 +2,7 @@ import time
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
 
-from checker import Checker
+from checker import Checker, StockStatus
 from backends import notify_desktop, notify_webhook, notify_email
 from config import build_product_list, load_config, validate_config
 
@@ -37,10 +37,10 @@ def main():
 
     def _check(product):
         try:
-            in_stock, details = checker.is_in_stock(product["url"])
-            return product, in_stock, details, None
+            result = checker.check(product["url"])
+            return product, result, None
         except Exception as exc:
-            return product, False, "", exc
+            return product, None, exc
 
     max_concurrent = min(len(products), 4)
     while True:
@@ -53,7 +53,7 @@ def main():
             futures = {executor.submit(_check, p): p for p in products}
             try:
                 for future in as_completed(futures, timeout=per_round_timeout):
-                    product, in_stock, details, exc = future.result()
+                    product, result, exc = future.result()
                     url = product["url"]
                     name = product["name"]
 
@@ -62,16 +62,16 @@ def main():
                         continue
 
                     logging.info(
-                        "checking stock for item: %s url=%s - in_stock=%s, details=%s",
+                        "checking stock for item: %s url=%s - status=%s, details=%s",
                         name,
                         url,
-                        in_stock,
-                        details,
+                        result.status.value,
+                        result.details,
                     )
                     now = time.time()
 
                     should_notify = False
-                    if in_stock:
+                    if result.status is StockStatus.IN_STOCK:
                         if not last_in_stock[url]:
                             should_notify = True
                         elif cooldown_seconds and now - last_notification_time[url] >= cooldown_seconds:
@@ -79,7 +79,7 @@ def main():
 
                     if should_notify:
                         title = f"{name} In Stock"
-                        message = f"{details} -- {url}"
+                        message = f"{result.details} -- {url}"
                         logging.info("In stock! %s", title)
                         if desktop:
                             notify_desktop(title, message)
@@ -92,7 +92,8 @@ def main():
                             notify_email(email_cfg, title, message, body)
                         last_notification_time[url] = now
 
-                    last_in_stock[url] = in_stock
+                    if result.status in (StockStatus.IN_STOCK, StockStatus.OUT_OF_STOCK):
+                        last_in_stock[url] = result.status is StockStatus.IN_STOCK
             except FuturesTimeoutError:
                 unfinished = sum(1 for future in futures if not future.done())
                 logging.warning(
