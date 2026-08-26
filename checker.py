@@ -416,7 +416,7 @@ class Checker:
                         logger.info("Button is not enabled; skipping click test")
                         click_ok = False
                     else:
-                        await page.click(click_target, timeout=3000)
+                        await element_handle.click(timeout=3000)
                         logger.info("Normal Playwright click succeeded — button appears enabled")
                         click_ok = True
                 except Exception as e:
