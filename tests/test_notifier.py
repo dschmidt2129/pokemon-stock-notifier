@@ -54,6 +54,13 @@ def test_validate_config_rejects_nonpositive_checker_attempt_timeout():
         validate_config(cfg, products)
 
 
+def test_validate_config_rejects_nonpositive_browser_concurrency():
+    cfg = {"browser_concurrency": 0}
+    products = [{"name": "Example", "url": "https://example.com"}]
+    with pytest.raises(ValueError, match="browser_concurrency must be a positive integer"):
+        validate_config(cfg, products)
+
+
 def test_validate_config_rejects_email_mapping_type():
     cfg = {"email": "not-a-map"}
     products = [{"name": "Example", "url": "https://example.com"}]

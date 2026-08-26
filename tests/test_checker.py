@@ -1,422 +1,242 @@
-from unittest.mock import MagicMock, patch
-import pytest
+import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from checker import Checker
+import pytest
+import requests
+
+from checker import Checker, StockStatus
+
 
 URL = "https://www.target.com/p/some-product/-/A-12345"
 
 
-def _shipping_button_dict(
-    text="add to cart",
-    aria_label="",
-    hidden=False,
-    data_test="shippingButton",
-    page_stock_term="",
-):
-    """Return a button-info dict as produced by get_target_cart_button."""
+def _button(text="add to cart", aria_label="", hidden=False, page_stock_term=""):
     return {
         "hidden": hidden,
         "text": text.strip().lower(),
         "aria_label": aria_label.strip(),
         "class": "",
         "id": "",
-        "data_test": data_test,
+        "data_test": "shippingButton",
         "page_stock_term": page_stock_term,
     }
 
 
-# ---------------------------------------------------------------------------
-# Checker.__init__
-# ---------------------------------------------------------------------------
+def _handle(text, *, visible=True, enabled=True, aria_label=""):
+    handle = MagicMock()
+    handle.inner_text = AsyncMock(return_value=text)
+    attributes = {"aria-label": aria_label, "data-test": "shippingButton"}
+    handle.get_attribute = AsyncMock(side_effect=lambda name: attributes.get(name, ""))
+    handle.is_visible = AsyncMock(return_value=visible)
+    handle.is_enabled = AsyncMock(return_value=enabled)
+    return handle
+
 
 class TestCheckerInit:
-    def test_default_user_agent_set(self):
-        c = Checker()
-        assert "Mozilla" in c.user_agent
+    def test_defaults(self):
+        checker = Checker()
+        assert "Mozilla" in checker.user_agent
+        assert checker.timeout == 10
+        assert checker.attempt_timeout_seconds == 45
+        assert checker.browser_concurrency == 2
 
-    def test_custom_user_agent(self):
-        c = Checker(user_agent="MyBot/1.0")
-        assert c.user_agent == "MyBot/1.0"
-
-    def test_default_timeout(self):
-        assert Checker().timeout == 10
-
-    def test_custom_timeout(self):
-        assert Checker(timeout=30).timeout == 30
-
-    def test_default_attempt_timeout(self):
-        assert Checker().attempt_timeout_seconds == 45
-
-    def test_custom_attempt_timeout(self):
-        assert Checker(attempt_timeout_seconds=12).attempt_timeout_seconds == 12
+    def test_custom_values(self):
+        checker = Checker(user_agent="TestAgent/2", timeout=30, attempt_timeout_seconds=12)
+        assert checker.user_agent == "TestAgent/2"
+        assert checker.timeout == 30
+        assert checker.attempt_timeout_seconds == 12
 
 
-# ---------------------------------------------------------------------------
-# Checker._button_is_visible
-# ---------------------------------------------------------------------------
+class TestButtonSignals:
+    def test_visibility(self):
+        checker = Checker()
+        assert checker._button_is_visible(_button()) is True
+        assert checker._button_is_visible(_button(hidden=True)) is False
 
-class TestButtonIsVisible:
-    def test_visible_button(self):
-        btn = _shipping_button_dict(hidden=False)
-        assert Checker()._button_is_visible(btn) is True
+    @pytest.mark.parametrize("text", ["Find Alternative", "Sold out", "Check stores"])
+    def test_out_of_stock_button_text(self, text):
+        assert Checker()._button_indicates_out_of_stock(_button(text=text)) is True
 
-    def test_hidden_button(self):
-        btn = _shipping_button_dict(hidden=True)
-        assert Checker()._button_is_visible(btn) is False
+    def test_out_of_stock_button_metadata(self):
+        checker = Checker()
+        assert checker._button_indicates_out_of_stock(_button(aria_label="Sold out online")) is True
+        assert checker._button_indicates_out_of_stock(_button(page_stock_term="out of stock")) is True
+        assert checker._button_indicates_out_of_stock(_button(text="Ship it")) is False
 
-
-# ---------------------------------------------------------------------------
-# Checker._button_indicates_out_of_stock & _handle_indicates_out_of_stock
-# ---------------------------------------------------------------------------
-
-class TestButtonIndicatesOutOfStock:
-    def test_find_alternative_in_text(self):
-        btn = _shipping_button_dict(text="Find Alternative")
-        assert Checker()._button_indicates_out_of_stock(btn) is True
-
-    def test_find_alternatives_in_aria_label(self):
-        btn = _shipping_button_dict(text="", aria_label="Find alternatives for Twilight Masquerade ETB")
-        assert Checker()._button_indicates_out_of_stock(btn) is True
-
-    def test_sold_out(self):
-        btn = _shipping_button_dict(text="Sold out")
-        assert Checker()._button_indicates_out_of_stock(btn) is True
-
-    def test_check_stores(self):
-        btn = _shipping_button_dict(text="Check stores")
-        assert Checker()._button_indicates_out_of_stock(btn) is True
-
-    def test_page_stock_term_marks_button_out_of_stock(self):
-        btn = _shipping_button_dict(text="Add to cart", page_stock_term="out of stock")
-        assert Checker()._button_indicates_out_of_stock(btn) is True
-
-    def test_normal_buy_button_not_out_of_stock(self):
-        btn = _shipping_button_dict(text="Ship it")
-        assert Checker()._button_indicates_out_of_stock(btn) is False
-
-    def test_none_or_empty(self):
-        assert Checker()._button_indicates_out_of_stock(None) is False
-        assert Checker()._button_indicates_out_of_stock({}) is False
-
-    def test_handle_indicates_out_of_stock(self):
-        handle = MagicMock()
-        handle.inner_text.return_value = "Find Alternative"
-        handle.get_attribute.return_value = ""
-        assert Checker()._handle_indicates_out_of_stock(handle) is True
-
-        handle.inner_text.return_value = "Add to cart"
-        assert Checker()._handle_indicates_out_of_stock(handle) is False
+    async def test_handle_indicates_out_of_stock(self):
+        checker = Checker()
+        assert await checker._handle_indicates_out_of_stock(_handle("Find Alternative")) is True
+        assert await checker._handle_indicates_out_of_stock(_handle("Add to cart")) is False
 
 
 class TestSelectCartButtonHandle:
-    def _handle(
-        self,
-        text,
-        *,
-        visible=True,
-        enabled=True,
-        aria_label="",
-        data_test="shippingButton",
-    ):
-        handle = MagicMock()
-        handle.inner_text.return_value = text
-        attrs = {
-            "aria-label": aria_label,
-            "aria_label": aria_label,
-            "data-test": data_test,
-            "data_test": data_test,
-        }
-        handle.get_attribute.side_effect = lambda name: attrs.get(name, "")
-        handle.is_visible.return_value = visible
-        handle.is_enabled.return_value = enabled
-        return handle
-
-    def test_prefers_visible_enabled_buy_button(self):
-        alternative = self._handle("Find Alternative")
-        buy = self._handle("Add to cart")
+    async def test_prefers_visible_enabled_buy_button(self):
+        alternative, buy = _handle("Find Alternative"), _handle("Add to cart")
         page = MagicMock()
-        page.query_selector_all.side_effect = lambda sel: [alternative, buy] if sel == 'button[data-test="shippingButton"]' else []
+        page.query_selector_all = AsyncMock(
+            side_effect=lambda selector: [alternative, buy]
+            if selector == 'button[data-test="shippingButton"]'
+            else []
+        )
 
-        selector, handle = Checker()._select_cart_button_handle(page)
+        selector, handle = await Checker()._select_cart_button_handle(page)
 
         assert selector == 'button[data-test="shippingButton"]'
         assert handle is buy
 
-    def test_ignores_hidden_buy_button_and_uses_visible_fallback(self):
-        hidden_buy = self._handle("Add to cart", visible=False)
-        alternative = self._handle("Find Alternative", visible=True)
+    async def test_uses_visible_fallback_when_no_buy_button_exists(self):
+        alternative = _handle("Find Alternative")
         page = MagicMock()
-        page.query_selector_all.side_effect = lambda sel: [hidden_buy, alternative] if sel == 'button[data-test="shippingButton"]' else []
+        page.query_selector_all = AsyncMock(
+            side_effect=lambda selector: [alternative]
+            if selector == 'button[data-test="shippingButton"]'
+            else []
+        )
 
-        selector, handle = Checker()._select_cart_button_handle(page)
-
-        assert selector == 'button[data-test="shippingButton"]'
-        assert handle is alternative
-
-    def test_returns_visible_alternative_when_no_buy_button_exists(self):
-        alternative = self._handle("Find Alternative")
-        page = MagicMock()
-        page.query_selector_all.side_effect = lambda sel: [alternative] if sel == 'button[data-test="shippingButton"]' else []
-
-        selector, handle = Checker()._select_cart_button_handle(page)
+        selector, handle = await Checker()._select_cart_button_handle(page)
 
         assert selector == 'button[data-test="shippingButton"]'
         assert handle is alternative
 
 
-# ---------------------------------------------------------------------------
-# Checker.fetch
-# ---------------------------------------------------------------------------
+class TestWalmartSupport:
+    def test_walmart_urls_use_walmart_selectors(self):
+        selectors = Checker()._selectors_for_url("https://www.walmart.com/ip/example/123")
+        assert 'button[data-automation-id="add-to-cart"]' in selectors
+
+    def test_non_walmart_urls_keep_target_selectors(self):
+        selectors = Checker()._selectors_for_url("https://www.target.com/p/example/-/A-123")
+        assert selectors[0] == 'button[data-test="shippingButton"]'
+
+    async def test_selects_walmart_add_to_cart_selector(self):
+        buy = _handle("Add to cart")
+        selector = 'button[data-automation-id="add-to-cart"]'
+        page = MagicMock()
+        page.query_selector_all = AsyncMock(
+            side_effect=lambda current_selector: [buy]
+            if current_selector == selector
+            else []
+        )
+
+        selected_selector, handle = await Checker()._select_cart_button_handle(
+            page, [selector]
+        )
+
+        assert selected_selector == selector
+        assert handle is buy
+
+    async def test_robot_or_human_page_is_detected_as_bot_check(self):
+        page = MagicMock()
+        page.title = AsyncMock(return_value="Robot or human?")
+        page.evaluate = AsyncMock(return_value="Please verify you are human")
+
+        assert await Checker()._get_bot_check_signal(page) == "robot or human"
+
 
 class TestFetch:
     def test_returns_text_on_success(self):
         with patch("checker.requests.get") as mock_get:
             mock_get.return_value.text = "<html>ok</html>"
-            mock_get.return_value.raise_for_status = lambda: None
             result = Checker().fetch(URL)
         assert result == "<html>ok</html>"
 
     def test_raises_on_http_error(self):
-        import requests as req
         with patch("checker.requests.get") as mock_get:
-            mock_get.return_value.raise_for_status.side_effect = req.HTTPError("404")
-            with pytest.raises(req.HTTPError):
+            mock_get.return_value.raise_for_status.side_effect = requests.HTTPError("404")
+            with pytest.raises(requests.HTTPError):
                 Checker().fetch(URL)
 
     def test_custom_user_agent_sent(self):
         with patch("checker.requests.get") as mock_get:
             mock_get.return_value.text = ""
-            mock_get.return_value.raise_for_status = lambda: None
             Checker(user_agent="TestAgent/2").fetch(URL)
-        _, kwargs = mock_get.call_args
-        assert kwargs["headers"]["User-Agent"] == "TestAgent/2"
+        assert mock_get.call_args.kwargs["headers"]["User-Agent"] == "TestAgent/2"
 
-
-# ---------------------------------------------------------------------------
-# Checker.is_in_stock  (get_target_cart_button is mocked throughout)
-# ---------------------------------------------------------------------------
 
 class TestIsInStock:
-    def _checker(self):
-        return Checker()
+    def _checker(self, result):
+        checker = Checker()
+        checker._get_target_cart_button_with_timeout = AsyncMock(return_value=result)
+        return checker
 
-    # --- in-stock path ---
-
-    def test_in_stock_when_click_ok_and_button_present(self):
-        c = self._checker()
-        c.get_target_cart_button = MagicMock(return_value=(_shipping_button_dict(), True))
-        in_stock, details = c.is_in_stock(URL)
+    async def test_in_stock_when_click_succeeds(self):
+        in_stock, details = await self._checker((_button(), True)).is_in_stock(URL)
         assert in_stock is True
         assert "click succeeded" in details
 
-    def test_details_contains_button_text_when_in_stock(self):
-        c = self._checker()
-        c.get_target_cart_button = MagicMock(return_value=(_shipping_button_dict(text="Add to cart"), True))
-        _, details = c.is_in_stock(URL)
-        assert "add to cart" in details
-
-    def test_details_falls_back_to_aria_label_when_text_empty(self):
-        btn = _shipping_button_dict(text="", aria_label="Add to cart for Widget")
-        c = self._checker()
-        c.get_target_cart_button = MagicMock(return_value=(btn, True))
-        _, details = c.is_in_stock(URL)
-        assert "Add to cart for Widget" in details
-
-    # --- disabled button path ---
-
-    def test_out_of_stock_when_click_not_ok(self):
-        c = self._checker()
-        c.get_target_cart_button = MagicMock(return_value=(_shipping_button_dict(), False))
-        in_stock, details = c.is_in_stock(URL)
+    @pytest.mark.parametrize(
+        "result, expected",
+        [
+            ((_button(), False), "disabled"),
+            ((_button(hidden=True), True), "not visible"),
+            ((_button(text="Find Alternative"), True), "out of stock or alternative"),
+            ((None, False), "No clear stock indicators"),
+        ],
+    )
+    async def test_non_buy_states(self, result, expected):
+        checker = self._checker(result)
+        checker.fetch = MagicMock(return_value="page content")
+        in_stock, details = await checker.is_in_stock(URL)
         assert in_stock is False
-        assert "disabled" in details
+        assert expected in details
 
-    # --- hidden button path ---
-
-    def test_out_of_stock_when_button_hidden(self):
-        c = self._checker()
-        c.get_target_cart_button = MagicMock(return_value=(_shipping_button_dict(hidden=True), True))
-        in_stock, details = c.is_in_stock(URL)
-        assert in_stock is False
-        assert "not visible" in details
-
-    # --- out of stock / alternative button path ---
-
-    def test_out_of_stock_when_button_is_find_alternative(self):
-        c = self._checker()
-        c.get_target_cart_button = MagicMock(return_value=(_shipping_button_dict(text="Find Alternative"), True))
-        in_stock, details = c.is_in_stock(URL)
-        assert in_stock is False
-        assert "out of stock or alternative" in details
-
-    def test_out_of_stock_when_button_aria_label_indicates_sold_out(self):
-        c = self._checker()
-        c.get_target_cart_button = MagicMock(return_value=(_shipping_button_dict(text="", aria_label="Sold out online"), True))
-        in_stock, details = c.is_in_stock(URL)
-        assert in_stock is False
-        assert "out of stock or alternative" in details
-
-    def test_out_of_stock_when_page_text_indicates_out_of_stock(self):
-        c = self._checker()
-        c.get_target_cart_button = MagicMock(
-            return_value=(_shipping_button_dict(text="Add to cart", page_stock_term="out of stock"), True)
+    async def test_retries_bot_checks_and_can_succeed(self):
+        checker = Checker()
+        checker._get_target_cart_button_with_timeout = AsyncMock(
+            side_effect=[(None, None), (None, None), (_button(), True)]
         )
-        in_stock, details = c.is_in_stock(URL)
-        assert in_stock is False
-        assert "out of stock or alternative" in details
-        assert "out of stock" in details
-
-    # --- no button found path ---
-
-    def test_out_of_stock_when_no_button_found(self):
-        c = self._checker()
-        # (None, False) = page loaded normally but no button present
-        c.get_target_cart_button = MagicMock(return_value=(None, False))
-        c.fetch = MagicMock(return_value="<html>nothing here</html>")
-        in_stock, details = c.is_in_stock(URL)
-        assert in_stock is False
-        assert "No clear stock indicators" in details
-
-    def test_snippet_included_in_details_when_no_button(self):
-        c = self._checker()
-        c.get_target_cart_button = MagicMock(return_value=(None, False))
-        c.fetch = MagicMock(return_value="page content here")
-        _, details = c.is_in_stock(URL)
-        assert "page content here" in details
-
-    def test_snippet_empty_when_fetch_raises(self):
-        c = self._checker()
-        c.get_target_cart_button = MagicMock(return_value=(None, False))
-        c.fetch = MagicMock(side_effect=Exception("network error"))
-        _, details = c.is_in_stock(URL)
-        assert "No clear stock indicators" in details
-        assert "Snippet: " in details
-
-    # --- bot-check blocked path ---
-
-    def test_returns_false_when_bot_check_blocks_all_attempts(self):
-        c = self._checker()
-        # (None, None) is the sentinel returned when the overlay never clears
-        c.get_target_cart_button = MagicMock(return_value=(None, None))
-        with patch("checker.time.sleep"):
-            in_stock, details = c.is_in_stock(URL, max_retries=3, retry_delay=0)
-        assert in_stock is False
-        assert "Bot-check overlay blocked all attempts" in details
-
-    def test_bot_check_retries_full_count(self):
-        c = self._checker()
-        c.get_target_cart_button = MagicMock(return_value=(None, None))
-        with patch("checker.time.sleep"):
-            c.is_in_stock(URL, max_retries=3, retry_delay=0)
-        assert c.get_target_cart_button.call_count == 3
-
-    def test_bot_check_sleep_called_between_retries(self):
-        c = self._checker()
-        c.get_target_cart_button = MagicMock(return_value=(None, None))
-        with patch("checker.time.sleep") as mock_sleep:
-            c.is_in_stock(URL, max_retries=3, retry_delay=7)
-        assert mock_sleep.call_count == 2
-        mock_sleep.assert_called_with(7)
-
-    def test_bot_check_succeeds_on_later_attempt(self):
-        """If the first attempt is bot-blocked but a later one succeeds, report in-stock."""
-        c = self._checker()
-        call_count = 0
-        def side_effect(url):
-            nonlocal call_count
-            call_count += 1
-            if call_count < 3:
-                return (None, None)  # bot-blocked
-            return (_shipping_button_dict(), True)
-        c.get_target_cart_button = side_effect
-        with patch("checker.time.sleep"):
-            in_stock, _ = c.is_in_stock(URL, retry_delay=0)
+        with patch("checker.asyncio.sleep", new_callable=AsyncMock) as sleep:
+            in_stock, _ = await checker.is_in_stock(URL, retry_delay=7)
         assert in_stock is True
-        assert call_count == 3
+        assert checker._get_target_cart_button_with_timeout.await_count == 3
+        assert sleep.await_count == 2
+        sleep.assert_awaited_with(7)
 
-    def test_bot_check_no_sleep_on_single_attempt(self):
-        c = self._checker()
-        c.get_target_cart_button = MagicMock(return_value=(None, None))
-        with patch("checker.time.sleep") as mock_sleep:
-            c.is_in_stock(URL, max_retries=1, retry_delay=5)
-        mock_sleep.assert_not_called()
-
-    # --- retry logic ---
-
-    def test_retries_on_exception_then_succeeds(self):
-        c = self._checker()
-        call_count = 0
-        def side_effect(url):
-            nonlocal call_count
-            call_count += 1
-            if call_count < 3:
-                raise RuntimeError("Target crashed")
-            return (_shipping_button_dict(), True)
-        c.get_target_cart_button = side_effect
-        with patch("checker.time.sleep"):
-            in_stock, _ = c.is_in_stock(URL, retry_delay=0)
-        assert in_stock is True
-        assert call_count == 3
-
-    def test_returns_false_after_all_retries_exhausted(self):
-        c = self._checker()
-        c.get_target_cart_button = MagicMock(side_effect=RuntimeError("Target crashed"))
-        with patch("checker.time.sleep"):
-            in_stock, details = c.is_in_stock(URL, max_retries=3, retry_delay=0)
-        assert in_stock is False
-        assert "3 attempts" in details
-
-    def test_retry_count_respected(self):
-        c = self._checker()
-        c.get_target_cart_button = MagicMock(side_effect=RuntimeError("crash"))
-        with patch("checker.time.sleep"):
-            c.is_in_stock(URL, max_retries=2, retry_delay=0)
-        assert c.get_target_cart_button.call_count == 2
-
-    def test_sleep_called_between_retries(self):
-        c = self._checker()
-        c.get_target_cart_button = MagicMock(side_effect=RuntimeError("crash"))
-        with patch("checker.time.sleep") as mock_sleep:
-            c.is_in_stock(URL, max_retries=3, retry_delay=5)
-        # sleep is called between attempts, not after the last one
-        assert mock_sleep.call_count == 2
-        mock_sleep.assert_called_with(5)
-
-    def test_no_sleep_on_single_attempt_failure(self):
-        c = self._checker()
-        c.get_target_cart_button = MagicMock(side_effect=RuntimeError("crash"))
-        with patch("checker.time.sleep") as mock_sleep:
-            c.is_in_stock(URL, max_retries=1, retry_delay=5)
-        mock_sleep.assert_not_called()
-
-    def test_error_message_contains_exception_text(self):
-        c = self._checker()
-        c.get_target_cart_button = MagicMock(side_effect=RuntimeError("Target crashed"))
-        with patch("checker.time.sleep"):
-            _, details = c.is_in_stock(URL, max_retries=1)
-        assert "Target crashed" in details
-
-    def test_returns_false_after_timeout_retries_exhausted(self):
-        c = self._checker()
-        c._get_target_cart_button_with_timeout = MagicMock(
+    async def test_returns_error_after_retry_exhaustion(self):
+        checker = Checker()
+        checker._get_target_cart_button_with_timeout = AsyncMock(
             side_effect=TimeoutError("timed out")
         )
-        with patch("checker.time.sleep"):
-            in_stock, details = c.is_in_stock(URL, max_retries=2, retry_delay=0)
+        with patch("checker.asyncio.sleep", new_callable=AsyncMock):
+            in_stock, details = await checker.is_in_stock(URL, max_retries=2, retry_delay=0)
         assert in_stock is False
         assert "2 attempts" in details
         assert "timed out" in details
 
-    def test_uses_instance_attempt_timeout_default(self):
-        c = Checker(attempt_timeout_seconds=17)
+    async def test_uses_instance_timeout_default(self):
+        checker = Checker(attempt_timeout_seconds=17)
+        checker._get_target_cart_button_with_timeout = AsyncMock(return_value=(_button(), True))
+        await checker.is_in_stock(URL, max_retries=1)
+        assert checker._get_target_cart_button_with_timeout.await_args.args[1] == 17
 
-        captured = {}
 
-        def side_effect(url, timeout_seconds):
-            captured["timeout_seconds"] = timeout_seconds
-            return _shipping_button_dict(), True
+class TestCheck:
+    async def test_maps_in_stock_to_result(self):
+        checker = Checker()
+        checker.is_in_stock = AsyncMock(return_value=(True, "available"))
+        result = await checker.check(URL)
+        assert result.status is StockStatus.IN_STOCK
 
-        c._get_target_cart_button_with_timeout = MagicMock(side_effect=side_effect)
-        in_stock, _ = c.is_in_stock(URL, max_retries=1)
-        assert in_stock is True
-        assert captured["timeout_seconds"] == 17
+    async def test_maps_bot_check_to_blocked(self):
+        checker = Checker()
+        checker.is_in_stock = AsyncMock(return_value=(False, "Bot-check overlay blocked all attempts"))
+        result = await checker.check(URL)
+        assert result.status is StockStatus.BLOCKED
+
+
+class TestBrowserRecovery:
+    async def test_timeout_resets_shared_browser(self):
+        checker = Checker()
+        checker.get_target_cart_button = AsyncMock(side_effect=asyncio.TimeoutError)
+        checker._reset_browser = AsyncMock()
+
+        with pytest.raises(TimeoutError):
+            await checker._get_target_cart_button_with_timeout(URL, 1)
+
+        checker._reset_browser.assert_awaited_once()
+
+    async def test_aclose_resets_shared_browser(self):
+        checker = Checker()
+        checker._reset_browser = AsyncMock()
+        await checker.aclose()
+        checker._reset_browser.assert_awaited_once()

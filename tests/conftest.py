@@ -14,3 +14,4 @@ if "playwright" not in sys.modules:
     _pw = MagicMock()
     sys.modules["playwright"] = _pw
     sys.modules["playwright.sync_api"] = _pw
+    sys.modules["playwright.async_api"] = _pw
