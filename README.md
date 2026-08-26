@@ -31,8 +31,8 @@ Walmart example:
 
 ```yaml
 products:
-	- name: Walmart product
-		url: "https://www.walmart.com/ip/example/123"
+  - name: Walmart product
+    url: "https://www.walmart.com/ip/example/123"
 interval_seconds: 60
 ```
 
