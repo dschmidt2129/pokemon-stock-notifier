@@ -2,7 +2,7 @@ import asyncio
 import logging
 import time
 
-from checker import Checker
+from checker import Checker, StockStatus
 from backends import notify_desktop, notify_webhook, notify_email
 from config import build_product_list, load_config, validate_config
 
