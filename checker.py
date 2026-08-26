@@ -2,6 +2,7 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from enum import Enum
+from urllib.parse import urlparse
 
 import requests
 from playwright.async_api import async_playwright
@@ -31,6 +32,13 @@ _CART_BUTTON_DATA_TESTS = [
 ]
 _CART_BUTTON_SELECTORS = [f'button[data-test="{dt}"]' for dt in _CART_BUTTON_DATA_TESTS]
 _CART_BUTTON_COMBINED = ", ".join(_CART_BUTTON_SELECTORS)
+_WALMART_CART_BUTTON_SELECTORS = [
+    'button[data-automation-id="add-to-cart"]',
+    'button[data-automation-id="atc-button"]',
+    'button[data-automation-id="shippingButton"]',
+    'button[data-testid*="add-to-cart" i]',
+    'button[aria-label*="add to cart" i]',
+]
 
 _OUT_OF_STOCK_TERMS = [
     "alternative",
@@ -43,6 +51,13 @@ _OUT_OF_STOCK_TERMS = [
     "see similar",
     "currently out of stock",
     "unavailable",
+]
+_BOT_CHECK_TERMS = [
+    "robot or human",
+    "verify you are human",
+    "verify you're human",
+    "are you a robot",
+    "captcha",
 ]
 
 # Resource types that never affect add-to-cart button state/visibility but make up the
@@ -209,6 +224,18 @@ class Checker:
             logger.info("Page text indicates out of stock: %s", matched_term)
         return matched_term
 
+    async def _get_bot_check_signal(self, page):
+        try:
+            title = await page.title()
+            body_text = await page.evaluate(
+                "() => document.body ? document.body.innerText : ''"
+            )
+        except Exception:
+            return None
+
+        combined_text = f"{title} {body_text}".lower()
+        return next((term for term in _BOT_CHECK_TERMS if term in combined_text), None)
+
     async def _handle_is_visible(self, handle):
         if not handle:
             return False
@@ -225,12 +252,13 @@ class Checker:
         except Exception:
             return False
 
-    async def _select_cart_button_handle(self, page):
+    async def _select_cart_button_handle(self, page, selectors=None):
+        selectors = selectors or _CART_BUTTON_SELECTORS
         fallback_selector = None
         fallback_handle = None
         fallback_visible = False
 
-        for sel in _CART_BUTTON_SELECTORS:
+        for sel in selectors:
             for handle in await page.query_selector_all(sel):
                 is_visible = await self._handle_is_visible(handle)
                 is_enabled = await self._handle_is_enabled(handle)
@@ -263,6 +291,12 @@ class Checker:
 
         return fallback_selector, fallback_handle
 
+    def _selectors_for_url(self, url):
+        hostname = (urlparse(url).hostname or "").lower()
+        if hostname == "walmart.com" or hostname.endswith(".walmart.com"):
+            return _WALMART_CART_BUTTON_SELECTORS
+        return _CART_BUTTON_SELECTORS
+
     def fetch(self, url):
         headers = {"User-Agent": self.user_agent}
         resp = requests.get(url, headers=headers, timeout=self.timeout)
@@ -271,6 +305,8 @@ class Checker:
 
     async def get_target_cart_button(self, url):
         browser = await self._ensure_browser()
+        cart_selectors = self._selectors_for_url(url)
+        cart_selector_combined = ", ".join(cart_selectors)
         btn_info = None
         click_ok = False
         context = await browser.new_context(
@@ -293,11 +329,20 @@ class Checker:
             # block the task indefinitely.
             await page.goto(url, wait_until="domcontentloaded", timeout=30000)
 
+            bot_check_signal = await self._get_bot_check_signal(page)
+            if bot_check_signal:
+                logger.warning(
+                    "Bot-check page detected (%s); treating result as blocked: %s",
+                    bot_check_signal,
+                    url,
+                )
+                return None, None
+
             # Target's Add to Cart button relies on data attributes.
             # We wait until any known candidate selector renders.
             # Target also applies dynamic content loading, so we wait for the button to appear and is clickable
             try:
-                await page.wait_for_selector(_CART_BUTTON_COMBINED, timeout=10000)
+                await page.wait_for_selector(cart_selector_combined, timeout=10000)
                 logger.info("Add to cart button selector found on the page.")
             except Exception:
                 print("Timeout waiting for the add to cart button element.")
@@ -326,7 +371,7 @@ class Checker:
                             logger.info("Network idle timeout after bot-check; proceeding")
                         # Re-wait for the shipping button in its final post-render state
                         try:
-                            await page.wait_for_selector(_CART_BUTTON_COMBINED, timeout=8000)
+                            await page.wait_for_selector(cart_selector_combined, timeout=8000)
                             logger.info("Shipping button confirmed present after bot-check re-render")
                         except Exception:
                             logger.info("Shipping button not found after bot-check re-render; using current state")
@@ -339,7 +384,9 @@ class Checker:
             page_stock_term = await self._get_page_out_of_stock_term(page)
 
             # Resolve whichever known selector is present on the page.
-            active_selector, element_handle = await self._select_cart_button_handle(page)
+            active_selector, element_handle = await self._select_cart_button_handle(
+                page, cart_selectors
+            )
 
             if not element_handle:
                 # Dump all button data-test attributes to help diagnose selector changes
@@ -398,7 +445,9 @@ class Checker:
             if element_handle:
                 try:
                     # Re-evaluate the active cart control after any page re-render.
-                    fresh_selector, fresh_handle = await self._select_cart_button_handle(page)
+                    fresh_selector, fresh_handle = await self._select_cart_button_handle(
+                        page, cart_selectors
+                    )
                     if fresh_handle:
                         active_selector = fresh_selector
                         element_handle = fresh_handle

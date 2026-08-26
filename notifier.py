@@ -43,10 +43,10 @@ async def main():
     async def _check(product):
         async with semaphore:
             try:
-                in_stock, details = await checker.is_in_stock(product["url"])
-                return product, in_stock, details, None
+                result = await checker.check(product["url"])
+                return product, result, None
             except Exception as exc:
-                return product, False, "", exc
+                return product, None, exc
 
     try:
         while True:
@@ -67,7 +67,7 @@ async def main():
                     await asyncio.gather(*pending, return_exceptions=True)
 
                 for task in done:
-                    product, in_stock, details, exc = task.result()
+                    product, result, exc = task.result()
                     url = product["url"]
                     name = product["name"]
 
@@ -76,16 +76,16 @@ async def main():
                         continue
 
                     logging.info(
-                        "checking stock for item: %s url=%s - in_stock=%s, details=%s",
+                        "checking stock for item: %s url=%s - status=%s, details=%s",
                         name,
                         url,
-                        in_stock,
-                        details,
+                        result.status.value,
+                        result.details,
                     )
                     now = time.time()
 
                     should_notify = False
-                    if in_stock:
+                    if result.status is StockStatus.IN_STOCK:
                         if not last_in_stock[url]:
                             should_notify = True
                         elif cooldown_seconds and now - last_notification_time[url] >= cooldown_seconds:
@@ -93,7 +93,7 @@ async def main():
 
                     if should_notify:
                         title = f"{name} In Stock"
-                        message = f"{details} -- {url}"
+                        message = f"{result.details} -- {url}"
                         logging.info("In stock! %s", title)
                         if desktop:
                             await asyncio.to_thread(notify_desktop, title, message)
@@ -110,7 +110,8 @@ async def main():
                             await asyncio.to_thread(notify_email, email_cfg, title, message, body)
                         last_notification_time[url] = now
 
-                    last_in_stock[url] = in_stock
+                    if result.status in (StockStatus.IN_STOCK, StockStatus.OUT_OF_STOCK):
+                        last_in_stock[url] = result.status is StockStatus.IN_STOCK
             finally:
                 for task in tasks:
                     if not task.done():

@@ -1,6 +1,10 @@
-# Pokemon Stock Notifier (Target example)
+# Pokemon Stock Notifier
 
-Simple Python app that polls a product page and notifies when it appears in stock.
+Simple Python app that polls supported product pages and notifies when an item appears in stock.
+
+The checker includes provider-aware handling for Target and Walmart URLs. Walmart availability
+is fulfillment-specific, so a visible product page is not by itself a guarantee that an item can
+be shipped or picked up at a particular location.
 
 Usage
 
@@ -22,6 +26,15 @@ python notifier.py
 ```
 
 If you are still using the old style config keys like `walmart_pokemon151_bb_url`, the notifier will continue to work by auto-detecting those URL keys.
+
+Walmart example:
+
+```yaml
+products:
+	- name: Walmart product
+		url: "https://www.walmart.com/ip/example/123"
+interval_seconds: 60
+```
 
 Email configuration example:
 
@@ -62,7 +75,12 @@ browser_concurrency: 2
 
 The default is `2`. Raise this only after measuring Chromium memory use on the host; each concurrent product check creates an isolated browser context and renderer processes.
 
+The checker reports `in_stock`, `out_of_stock`, `unknown`, or `blocked`. The notifier alerts only
+for `in_stock`; `unknown` and `blocked` do not reset a previously known stock state.
+
 The notifier sends email notifications for each product when stock is first detected and will resend after the configured cooldown if the product remains in stock.
 
 - The checker uses simple heuristics and may need adjustment for specific product pages. Edit `checker.py` to refine selectors or keywords.
+- Walmart selectors may change as the site evolves. The checker logs when no supported fulfillment control is found.
+- Pages such as `Robot or human?` are treated as blocked; the checker does not attempt to bypass challenges.
 - If desktop notifications don't work, the script prints a console fallback message.

@@ -99,6 +99,40 @@ class TestSelectCartButtonHandle:
         assert handle is alternative
 
 
+class TestWalmartSupport:
+    def test_walmart_urls_use_walmart_selectors(self):
+        selectors = Checker()._selectors_for_url("https://www.walmart.com/ip/example/123")
+        assert 'button[data-automation-id="add-to-cart"]' in selectors
+
+    def test_non_walmart_urls_keep_target_selectors(self):
+        selectors = Checker()._selectors_for_url("https://www.target.com/p/example/-/A-123")
+        assert selectors[0] == 'button[data-test="shippingButton"]'
+
+    async def test_selects_walmart_add_to_cart_selector(self):
+        buy = _handle("Add to cart")
+        selector = 'button[data-automation-id="add-to-cart"]'
+        page = MagicMock()
+        page.query_selector_all = AsyncMock(
+            side_effect=lambda current_selector: [buy]
+            if current_selector == selector
+            else []
+        )
+
+        selected_selector, handle = await Checker()._select_cart_button_handle(
+            page, [selector]
+        )
+
+        assert selected_selector == selector
+        assert handle is buy
+
+    async def test_robot_or_human_page_is_detected_as_bot_check(self):
+        page = MagicMock()
+        page.title = AsyncMock(return_value="Robot or human?")
+        page.evaluate = AsyncMock(return_value="Please verify you are human")
+
+        assert await Checker()._get_bot_check_signal(page) == "robot or human"
+
+
 class TestFetch:
     def test_returns_text_on_success(self):
         with patch("checker.requests.get") as mock_get:
