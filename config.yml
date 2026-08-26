@@ -1,10 +1,10 @@
 products:
   # todo: work on Walmart links, they are not working currently due to the way Walmart loads their pages. The links below are commented out until this is fixed.
   # todo: need to update the links for walmart
-  # - name: "Walmart Destined Rivals Booster Bundle"
-  #   url: "https://www.walmart.com/ip/Pokemon-TCG-Scarlet-Violet-Destined-Rivals-Booster-Bundle-6-Packs/16019713971?conditionGroupCode=4&filters=%5B%7B%22intent%22%3A%22retailer%22%2C%22values%22%3A%5B%22Walmart%22%5D%7D%5D&classType=REGULAR&from=/search"
-  # - name: "Walmart Destined Rivals Booster Pack"
-  #   url: "https://www.walmart.com/ip/Pokemon-TCG-Scarlet-Violet-Destined-Rivals-Blister-Booster-Pack-10-Cards/16034470614?conditionGroupCode=4&filters=%5B%7B%22intent%22%3A%22retailer%22%2C%22values%22%3A%5B%22Walmart%22%5D%7D%5D&classType=REGULAR&from=/search"
+  - name: "Walmart Destined Rivals Booster Bundle"
+    url: "https://www.walmart.com/ip/Pokemon-TCG-Scarlet-Violet-Destined-Rivals-Booster-Bundle-6-Packs/16019713971?conditionGroupCode=4&filters=%5B%7B%22intent%22%3A%22retailer%22%2C%22values%22%3A%5B%22Walmart%22%5D%7D%5D&classType=REGULAR&from=/search"
+  - name: "Walmart Destined Rivals Booster Pack"
+    url: "https://www.walmart.com/ip/Pokemon-TCG-Scarlet-Violet-Destined-Rivals-Blister-Booster-Pack-10-Cards/16034470614?conditionGroupCode=4&filters=%5B%7B%22intent%22%3A%22retailer%22%2C%22values%22%3A%5B%22Walmart%22%5D%7D%5D&classType=REGULAR&from=/search"
  
   # Destined Rivals
   - name: "Target Destined Rivals 3 Pack Blister"
@@ -26,12 +26,12 @@ products:
   # - name: "Target Pokemon 151 Booster Bundle"
   #   url: "https://www.target.com/p/pokemon-scarlet-violet-s3-5-booster-bundle-box/-/A-88897904#lnk=sametab"
   # Twilight Masquerade
-  # - name: "Target Twilight Masquerade ETB"
-  #   url: "https://www.target.com/p/pok-233-mon-trading-card-game-scarlet-38-violet-8212-twilight-masquerade-elite-trainer-box/-/A-91619960#lnk=sametab"
-  # - name: "Target Twilight Masquerade Booster Bundle"
-  #   url: "https://www.target.com/p/pok-233-mon-trading-card-game-scarlet-38-violet-8212-twilight-masquerade-booster-bundle/-/A-91619954#lnk=sametab"
-  # - name: "Target Twilight Masquerade 3 Pack Blister"
-  #   url: "https://www.target.com/p/pok-233-mon-trading-card-game-scarlet-38-violet-8212-twilight-masquerade-three-booster-blister-revavroom/-/A-91619920#lnk=sametab"  
+  - name: "Target Twilight Masquerade ETB"
+    url: "https://www.target.com/p/pok-233-mon-trading-card-game-scarlet-38-violet-8212-twilight-masquerade-elite-trainer-box/-/A-91619960"
+  - name: "Target Twilight Masquerade Booster Bundle"
+    url: "https://www.target.com/p/pok-233-mon-trading-card-game-scarlet-38-violet-8212-twilight-masquerade-booster-bundle/-/A-91619954"
+  - name: "Target Twilight Masquerade 3 Pack Blister"
+    url: "https://www.target.com/p/pok-233-mon-trading-card-game-scarlet-38-violet-8212-twilight-masquerade-three-booster-blister-revavroom/-/A-91619920"  
   # Chaos Rising
   - name: "Target Chaos Rising ETB"
     url: "https://www.target.com/p/pok-233-mon-trading-card-game-mega-evolution-chaos-rising-elite-trainer-box/-/A-95267143"
@@ -44,18 +44,21 @@ products:
   - name: "Target Greninja EX Premium Collection"
     url: "https://www.target.com/p/pok-233-mon-trading-card-game-mega-greninja-ex-premium-collection/-/A-1011209273"
     # Perfect Order
-  # - name: "Target Perfect Order ETB"
-  #   url: "https://www.target.com/p/pok-233-mon-trading-card-game-mega-evolution-perfect-order-elite-trainer-box/-/A-95230445"
-  # - name: "Target Perfect Order Booster Bundle"
-  #   url: "https://www.target.com/p/pok-233-mon-mega-evolution-s3-perfect-order-booster-bundle-box/-/A-95230447"
-  # - name: "Target Perfect Order 3 Pack Blister"
-  #   url: "https://www.target.com/p/pok-233-mon-trading-card-game-mega-evolution-perfect-order-3-booster-blister/-/A-95230446"
-  # - name: "Target Mega Zygarde EX Premium Collection"
-  #   url: "https://www.target.com/p/pok-233-mon-trading-card-game-mega-zygarde-ex-premium-collection/-/A-95280894"
+  - name: "Target Perfect Order ETB"
+    url: "https://www.target.com/p/pok-233-mon-trading-card-game-mega-evolution-perfect-order-elite-trainer-box/-/A-95230445"
+  - name: "Target Perfect Order Booster Bundle"
+    url: "https://www.target.com/p/pok-233-mon-mega-evolution-s3-perfect-order-booster-bundle-box/-/A-95230447"
+  - name: "Target Perfect Order 3 Pack Blister"
+    url: "https://www.target.com/p/pok-233-mon-trading-card-game-mega-evolution-perfect-order-3-booster-blister/-/A-95230446"
+  - name: "Target Mega Zygarde EX Premium Collection"
+    url: "https://www.target.com/p/pok-233-mon-trading-card-game-mega-zygarde-ex-premium-collection/-/A-95280894"
     # First Partner Illustration Collection
-  - name: "Target First Partner Illustration Collection"
+  - name: "Target First Partner Illustration Collection Series 2"
     url: "https://www.target.com/p/pok-233-mon-trading-card-game-first-partner-illustration-collectionseries-2/-/A-1011209279"
-    # todo: add first partner series 1 and 3 to this config
+  - name: "Target First Partner Illustration Collection Series 1"
+    url: "https://www.target.com/p/pok-233-mon-trading-card-game-first-partner-illustration-collection-series-1/-/A-95225595"
+  - name: "Target First Partner Illustration Collection Series 3"
+    url: "https://www.target.com/p/pok-233-mon-trading-card-game-first-partner-illustration-collection-8212-series-3/-/A-1011960739"
   # - name: "Target Test Product"
   #   url: "https://www.target.com/p/pokemon-scarlet-violet-destined-rivals-build-battle-box/-/A-1003610291#lnk=sametab"
 interval_seconds: 1
