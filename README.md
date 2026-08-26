@@ -54,6 +54,14 @@ checker_attempt_timeout_seconds: 45
 
 This per-product timeout ensures a stuck browser check fails fast and the notifier loop continues.
 
+Optional browser concurrency example:
+
+```yaml
+browser_concurrency: 2
+```
+
+The default is `2`. Raise this only after measuring Chromium memory use on the host; each concurrent product check creates an isolated browser context and renderer processes.
+
 The notifier sends email notifications for each product when stock is first detected and will resend after the configured cooldown if the product remains in stock.
 
 - The checker uses simple heuristics and may need adjustment for specific product pages. Edit `checker.py` to refine selectors or keywords.

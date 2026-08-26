@@ -141,6 +141,11 @@ def validate_config(cfg, products):
         if not isinstance(attempt_timeout, int) or attempt_timeout <= 0:
             raise ValueError("checker_attempt_timeout_seconds must be a positive integer")
 
+    if cfg.get("browser_concurrency") is not None:
+        browser_concurrency = cfg["browser_concurrency"]
+        if not isinstance(browser_concurrency, int) or browser_concurrency <= 0:
+            raise ValueError("browser_concurrency must be a positive integer")
+
     email_cfg = cfg.get("email")
     if email_cfg is None:
         return
