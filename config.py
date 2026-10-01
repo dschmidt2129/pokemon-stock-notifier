@@ -3,7 +3,6 @@ from pathlib import Path
 
 import yaml
 
-
 EMAIL_ENV_KEYS = (
     "SMTP_SERVER",
     "SMTP_PORT",
@@ -56,7 +55,7 @@ def load_dotenv(path=".env"):  # pragma: no cover
 def load_email_env_config(path=".env"):
     env = load_dotenv(path)
     for key in EMAIL_ENV_KEYS:
-        if key in os.environ:
+        if key not in env and key in os.environ:
             env[key] = os.environ[key]
 
     if not env:
@@ -151,7 +150,9 @@ def validate_config(cfg, products):
         return
 
     if not isinstance(email_cfg, dict):
-        raise ValueError("The 'email' config section must be a mapping")
+        raise ValueError(  # noqa: TRY004 - config validation exposes ValueError consistently
+            "The 'email' config section must be a mapping"
+        )
 
     enabled_keys = ("smtp_server", "username", "password", "from", "to")
     enabled = any(bool(email_cfg.get(k)) for k in enabled_keys)

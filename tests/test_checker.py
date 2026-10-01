@@ -6,7 +6,6 @@ import requests
 
 from checker import Checker, StockStatus
 
-
 URL = "https://www.target.com/p/some-product/-/A-12345"
 
 

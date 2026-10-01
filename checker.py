@@ -5,6 +5,7 @@ from enum import Enum
 from urllib.parse import urlparse
 
 import requests
+from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import async_playwright
 from playwright_stealth import Stealth
 
@@ -161,12 +162,12 @@ class Checker:
             if browser is not None:
                 try:
                     await browser.close()
-                except Exception:
-                    pass
+                except (RuntimeError, OSError) as exc:
+                    logger.warning("Failed to close browser during reset: %s", exc)
             if playwright is not None:
                 try:
                     await playwright.stop()
-                except Exception:
+                except (RuntimeError, OSError):
                     pass
 
     async def aclose(self):
@@ -208,7 +209,7 @@ class Checker:
             data_test = await handle.get_attribute("data-test")
             matched_term = self._find_out_of_stock_term(text, aria_label, data_test)
             return matched_term is not None
-        except Exception:
+        except (AttributeError, PlaywrightError, RuntimeError):
             return False
 
     async def _get_page_out_of_stock_term(self, page):
@@ -216,7 +217,7 @@ class Checker:
             page_text = await page.evaluate(
                 "() => document.body ? document.body.innerText : ''"
             )
-        except Exception:
+        except (AttributeError, PlaywrightError, RuntimeError):
             return None
 
         matched_term = self._find_out_of_stock_term(page_text)
@@ -230,7 +231,7 @@ class Checker:
             body_text = await page.evaluate(
                 "() => document.body ? document.body.innerText : ''"
             )
-        except Exception:
+        except (AttributeError, PlaywrightError, RuntimeError):
             return None
 
         combined_text = f"{title} {body_text}".lower()
@@ -241,7 +242,7 @@ class Checker:
             return False
         try:
             return await handle.is_visible()
-        except Exception:
+        except (AttributeError, PlaywrightError, RuntimeError):
             return False
 
     async def _handle_is_enabled(self, handle):
@@ -249,7 +250,7 @@ class Checker:
             return False
         try:
             return await handle.is_enabled()
-        except Exception:
+        except (AttributeError, PlaywrightError, RuntimeError):
             return False
 
     async def _select_cart_button_handle(self, page, selectors=None):
@@ -344,7 +345,7 @@ class Checker:
             try:
                 await page.wait_for_selector(cart_selector_combined, timeout=10000)
                 logger.info("Add to cart button selector found on the page.")
-            except Exception:
+            except PlaywrightError:
                 print("Timeout waiting for the add to cart button element.")
 
             # Target shows a bot-detection challenge ("Loading screen / Almost there...")
@@ -367,24 +368,24 @@ class Checker:
                         try:
                             await page.wait_for_load_state("networkidle", timeout=5000)
                             logger.info("Network idle reached after bot-check — stock state is final")
-                        except Exception:
+                        except (PlaywrightError, RuntimeError, asyncio.TimeoutError):
                             logger.info("Network idle timeout after bot-check; proceeding")
                         # Re-wait for the shipping button in its final post-render state
                         try:
                             await page.wait_for_selector(cart_selector_combined, timeout=8000)
                             logger.info("Shipping button confirmed present after bot-check re-render")
-                        except Exception:
+                        except (PlaywrightError, RuntimeError, asyncio.TimeoutError):
                             logger.info("Shipping button not found after bot-check re-render; using current state")
-                    except Exception as overlay_e:
+                    except (PlaywrightError, RuntimeError, asyncio.TimeoutError) as overlay_e:
                         logger.warning("Bot-check overlay did not clear (bot likely blocked request): %s", overlay_e)
                         return None, None
-            except Exception as bot_e:
+            except (PlaywrightError, RuntimeError, asyncio.TimeoutError) as bot_e:
                 logger.info("Bot-check overlay evaluation error: %s", bot_e)
 
             page_stock_term = await self._get_page_out_of_stock_term(page)
 
             # Resolve whichever known selector is present on the page.
-            active_selector, element_handle = await self._select_cart_button_handle(
+            _, element_handle = await self._select_cart_button_handle(
                 page, cart_selectors
             )
 
@@ -400,11 +401,10 @@ class Checker:
                         "Button data-test values on page: %s",
                         all_dt,
                     )
-                except Exception as diag_e:
+                except (PlaywrightError, RuntimeError) as diag_e:
                     logger.warning("Could not read button data-test values: %s", diag_e)
                 logger.info("Playwright could not find button element for clicking")
             else:
-                click_target = active_selector
                 try:
                     if await self._handle_indicates_out_of_stock(element_handle):
                         logger.info("Button text indicates out-of-stock or alternative; skipping click test")
@@ -419,7 +419,7 @@ class Checker:
                         await element_handle.click(timeout=3000)
                         logger.info("Normal Playwright click succeeded — button appears enabled")
                         click_ok = True
-                except Exception as e:
+                except (PlaywrightError, RuntimeError, asyncio.TimeoutError) as e:
                     err_text = str(e)
                     logger.info("Normal Playwright click failed: %s", err_text)
                     if "intercepts pointer events" in err_text or "intercepting pointer events" in err_text:
@@ -445,11 +445,10 @@ class Checker:
             if element_handle:
                 try:
                     # Re-evaluate the active cart control after any page re-render.
-                    fresh_selector, fresh_handle = await self._select_cart_button_handle(
+                    _, fresh_handle = await self._select_cart_button_handle(
                         page, cart_selectors
                     )
                     if fresh_handle:
-                        active_selector = fresh_selector
                         element_handle = fresh_handle
                     btn_info = {
                         "hidden": (await element_handle.get_attribute("hidden")) is not None,
@@ -461,7 +460,7 @@ class Checker:
                         "page_stock_term": page_stock_term or "",
                     }
                     logger.info("Button attributes extracted: data-test=%r", btn_info["data_test"])
-                except Exception as attr_e:
+                except (AttributeError, RuntimeError) as attr_e:
                     logger.warning("Could not read button attributes from handle: %s", attr_e)
         except Exception:
             if not browser.is_connected():
@@ -513,7 +512,7 @@ class Checker:
                         logger.error("All %d attempts blocked by bot-check for %s", max_retries, url)
                         return False, "Bot-check overlay blocked all attempts"
                 break
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - retry all transient checker failures
                 logger.warning(
                     "get_target_cart_button attempt %d/%d failed for %s: %s",
                     attempt, max_retries, url, exc,
@@ -560,7 +559,7 @@ class Checker:
         logger.info("No add-to-cart button found")
         try:
             snippet = self.fetch(url)[:200]
-        except Exception:
+        except requests.RequestException:
             snippet = ""
         return False, f"No clear stock indicators. Snippet: {snippet}"
 

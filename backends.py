@@ -1,7 +1,10 @@
 import logging
-import requests
 import smtplib
 from email.message import EmailMessage
+
+import requests
+
+logger = logging.getLogger(__name__)
 
 
 def notify_desktop(title, message):
@@ -10,7 +13,7 @@ def notify_desktop(title, message):
 
         notification.notify(title=title, message=message, timeout=10)
     except Exception:
-        logging.exception("Desktop notification failed, falling back to console")
+        logger.exception("Desktop notification failed, falling back to console")
         print(f"NOTIFICATION: {title} - {message}")
 
 
@@ -19,7 +22,7 @@ def notify_webhook(url, payload):
         resp = requests.post(url, json=payload, timeout=10)
         resp.raise_for_status()
     except Exception:
-        logging.exception("Webhook notification failed")
+        logger.exception("Webhook notification failed")
 
 
 def notify_email(email_cfg, title, message, body=""):
@@ -35,7 +38,7 @@ def notify_email(email_cfg, title, message, body=""):
         use_ssl = email_cfg.get("use_ssl", False)
 
         if not smtp_server or not from_addr or not to_addrs:
-            logging.warning("Email notification skipped because email config is incomplete")
+            logger.warning("Email notification skipped because email config is incomplete")
             return
 
         if isinstance(to_addrs, str):
@@ -60,6 +63,6 @@ def notify_email(email_cfg, title, message, body=""):
                 server.login(username, password)
             server.send_message(email_message)
 
-        logging.info("Email notification sent to %s", to_addrs)
+        logger.info("Email notification sent to %s", to_addrs)
     except Exception:
-        logging.exception("Email notification failed")
+        logger.exception("Email notification failed")

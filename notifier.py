@@ -2,11 +2,12 @@ import asyncio
 import logging
 import time
 
+from backends import notify_desktop, notify_email, notify_webhook
 from checker import Checker, StockStatus
-from backends import notify_desktop, notify_webhook, notify_email
 from config import build_product_list, load_config, validate_config
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logger = logging.getLogger(__name__)
 
 
 async def main():
@@ -33,9 +34,9 @@ async def main():
     last_in_stock = {product["url"]: False for product in products}
     last_notification_time = {product["url"]: 0.0 for product in products}
 
-    logging.info("Starting notifier for %s products (every %ss)", len(products), interval)
+    logger.info("Starting notifier for %s products (every %ss)", len(products), interval)
     for product in products:
-        logging.info(" - %s: %s", product["name"], product["url"])
+        logger.info(" - %s: %s", product["name"], product["url"])
 
     max_concurrent = min(len(products), browser_concurrency)
     semaphore = asyncio.Semaphore(max_concurrent)
@@ -45,7 +46,7 @@ async def main():
             try:
                 result = await checker.check(product["url"])
                 return product, result, None
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - isolate failures per product
                 return product, None, exc
 
     try:
@@ -57,7 +58,7 @@ async def main():
             try:
                 done, pending = await asyncio.wait(tasks, timeout=per_round_timeout)
                 if pending:
-                    logging.warning(
+                    logger.warning(
                         "Round timed out after %ss — %s product check(s) still running; cancelling them",
                         per_round_timeout,
                         len(pending),
@@ -72,10 +73,10 @@ async def main():
                     name = product["name"]
 
                     if exc is not None:
-                        logging.error("Error checking %s: %s", name, exc, exc_info=exc)
+                        logger.error("Error checking %s: %s", name, exc, exc_info=exc)
                         continue
 
-                    logging.info(
+                    logger.info(
                         "checking stock for item: %s url=%s - status=%s, details=%s",
                         name,
                         url,
@@ -85,16 +86,17 @@ async def main():
                     now = time.time()
 
                     should_notify = False
-                    if result.status is StockStatus.IN_STOCK:
-                        if not last_in_stock[url]:
-                            should_notify = True
-                        elif cooldown_seconds and now - last_notification_time[url] >= cooldown_seconds:
-                            should_notify = True
+                    if result.status is StockStatus.IN_STOCK and (
+                        not last_in_stock[url]
+                        or cooldown_seconds
+                        and now - last_notification_time[url] >= cooldown_seconds
+                    ):
+                        should_notify = True
 
                     if should_notify:
                         title = f"{name} In Stock"
                         message = f"{result.details} -- {url}"
-                        logging.info("In stock! %s", title)
+                        logger.info("In stock! %s", title)
                         if desktop:
                             await asyncio.to_thread(notify_desktop, title, message)
                         if webhook:

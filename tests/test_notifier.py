@@ -1,5 +1,3 @@
-import os
-
 import pytest
 
 from config import build_product_list, load_config, validate_config
